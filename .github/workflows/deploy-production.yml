@@ -47,9 +47,9 @@ jobs:
         run: |
           doppler run -- bash -euo pipefail -c '
             # Strip any trailing slash so we never build a "//" path, and hit
-            # the REST root, which is a guaranteed 200 with a valid apikey.
+            # the Auth health endpoint, which is a guaranteed 200.
             base="${NEXT_PUBLIC_SUPABASE_URL%/}"
-            curl -fsS "$base/rest/v1/" \
+            curl -fsS "$base/auth/v1/health" \
               -H "apikey: $NEXT_PUBLIC_SUPABASE_ANON_KEY" > /dev/null \
-              && echo "Supabase REST healthy."
+              && echo "Supabase Auth healthy."
           '
