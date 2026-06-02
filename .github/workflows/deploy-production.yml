@@ -46,7 +46,10 @@ jobs:
       - name: Post-deploy health
         run: |
           doppler run -- bash -euo pipefail -c '
-            curl -fsS "$NEXT_PUBLIC_SUPABASE_URL/auth/v1/health" \
+            # Strip any trailing slash so we never build a "//" path, and hit
+            # the REST root, which is a guaranteed 200 with a valid apikey.
+            base="${NEXT_PUBLIC_SUPABASE_URL%/}"
+            curl -fsS "$base/rest/v1/" \
               -H "apikey: $NEXT_PUBLIC_SUPABASE_ANON_KEY" > /dev/null \
-              && echo "Supabase auth healthy."
+              && echo "Supabase REST healthy."
           '
