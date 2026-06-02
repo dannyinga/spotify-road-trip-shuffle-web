@@ -1,0 +1,52 @@
+# Backend deploy for production. The `environment: production` line is QA Gate 3:
+# add a required reviewer to the "production" GitHub Environment and this job
+# pauses for manual approval before any migration touches prod.
+name: deploy-production
+
+on:
+  push:
+    branches: [prd]
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    environment: production # GitHub Environment → require a reviewer = manual gate
+    env:
+      DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_PRD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dopplerhq/cli-action@v3
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Push migrations
+        run: |
+          doppler run -- bash -euo pipefail -c '
+            export SUPABASE_ACCESS_TOKEN="$NEXT_SUPABASE_PAT"
+            supabase link --project-ref "$NEXT_SUPABASE_PROJECT_REF" --password "$NEXT_SUPABASE_DB_PASSWORD"
+            supabase db push --password "$NEXT_SUPABASE_DB_PASSWORD"
+          '
+
+      - name: Deploy edge functions (if any)
+        run: |
+          if ls supabase/functions/*/index.ts >/dev/null 2>&1; then
+            doppler run -- bash -euo pipefail -c '
+              export SUPABASE_ACCESS_TOKEN="$NEXT_SUPABASE_PAT"
+              supabase functions deploy --project-ref "$NEXT_SUPABASE_PROJECT_REF"
+            '
+          else
+            echo "No edge functions to deploy."
+          fi
+
+      - name: Post-deploy health
+        run: |
+          doppler run -- bash -euo pipefail -c '
+            curl -fsS "$NEXT_PUBLIC_SUPABASE_URL/auth/v1/health" \
+              -H "apikey: $NEXT_PUBLIC_SUPABASE_ANON_KEY" > /dev/null \
+              && echo "Supabase auth healthy."
+          '

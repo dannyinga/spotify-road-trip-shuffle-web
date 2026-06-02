@@ -1,0 +1,43 @@
+# Backend deploy for staging. With the 2-project (free-tier) setup, the `stg`
+# Doppler config points NEXT_SUPABASE_PROJECT_REF at the dev Supabase project.
+# To give staging its own database later, change that one Doppler var — nothing
+# in this workflow needs to move.
+name: deploy-staging
+
+on:
+  push:
+    branches: [stg]
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    env:
+      DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_STG }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dopplerhq/cli-action@v3
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Push migrations
+        run: |
+          doppler run -- bash -euo pipefail -c '
+            export SUPABASE_ACCESS_TOKEN="$NEXT_SUPABASE_PAT"
+            supabase link --project-ref "$NEXT_SUPABASE_PROJECT_REF" --password "$NEXT_SUPABASE_DB_PASSWORD"
+            supabase db push --password "$NEXT_SUPABASE_DB_PASSWORD"
+          '
+
+      - name: Post-deploy smoke
+        run: |
+          doppler run -- bash -euo pipefail -c '
+            if [ -n "${NEXT_PUBLIC_SITE_URL:-}" ]; then
+              curl -fsS "$NEXT_PUBLIC_SITE_URL" > /dev/null && echo "Staging site reachable."
+            else
+              echo "NEXT_PUBLIC_SITE_URL not set; skipping site smoke."
+            fi
+          '

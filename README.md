@@ -1,36 +1,72 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Road Trip Shuffle
 
-## Getting Started
+Build custom shuffled Spotify playlists that play like a stack of CDs in a car
+changer: each **album plays in its real running order**, but the **albums are
+shuffled**. Put on a whole record, then jump to a different one — no songs from
+the same album scattered across the playlist.
 
-First, run the development server:
+This is an onboarding project that mirrors the Vine Health stack so the tooling
+becomes muscle memory.
+
+## Stack
+
+| Layer        | Tech                                                      |
+| ------------ | -------------------------------------------------------- |
+| Frontend     | Next.js (App Router, TypeScript) + Tailwind              |
+| Server/API   | Next.js Route Handlers (hold the Spotify secret here)    |
+| Auth + DB    | Supabase (Spotify OAuth provider, Postgres, RLS)         |
+| Client state | TanStack React Query                                      |
+| Secrets      | Doppler (`dev` / `stg` / `prd`)                          |
+| Hosting      | Vercel (frontend) + Supabase (backend)                   |
+| Tests        | Vitest (unit) + Playwright (e2e)                          |
+
+## Architecture in one paragraph
+
+The browser never sees the Spotify client secret. "Log in with Spotify" goes
+through Supabase Auth, which stores and refreshes the user's Spotify tokens. A
+server-side Route Handler reads the user's playlist from Spotify, runs the pure
+[`roadTripShuffle`](src/lib/shuffle/road-trip-shuffle.ts) function, and writes
+the reordered playlist back. Postgres stores **recipes** — the source playlist
+plus the seed that reproduces an exact ordering — each row scoped to its owner
+by Row-Level Security.
+
+## First-time setup
+
+These steps need your own accounts, so they're yours to run:
+
+1. **Doppler** — create a `spotify-road-trip-shuffle` project with `dev` / `stg`
+   / `prd` configs, then `doppler setup` in this folder to select `dev`.
+2. **Supabase** — create a project, then link it:
+   ```bash
+   doppler run -- npx supabase link
+   ```
+   Push the first migration:
+   ```bash
+   npm run db:push
+   ```
+3. **Spotify** — register an app at
+   https://developer.spotify.com/dashboard, add the redirect URI
+   `http://127.0.0.1:3000/auth/callback`, and in the Supabase dashboard enable
+   the **Spotify** auth provider with that client id/secret.
+4. Put all values in Doppler (see [.env.local.example](.env.local.example) for
+   the variable names). Never paste real values into files or commits.
+
+## Develop
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+doppler run -- npm run dev        # http://127.0.0.1:3000
+npm run test:unit                 # vitest (the shuffle algorithm)
+npm run typecheck                 # tsc --noEmit
+npm run db:migrate:check          # supabase db lint
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## What's built so far
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- [x] Next.js + Tailwind + TypeScript scaffold
+- [x] Supabase SSR client/server/middleware helpers
+- [x] React Query provider wired into the root layout
+- [x] `roadTripShuffle` pure algorithm + Vitest suite
+- [x] First migration: `shuffle_recipes` table with owner-only RLS
+- [ ] Spotify OAuth login flow
+- [ ] Read playlist → shuffle → write-back Route Handler
+- [ ] Recipe save/list UI

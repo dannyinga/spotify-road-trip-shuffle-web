@@ -1,0 +1,43 @@
+# Backend deploy for the dev environment. Frontend rides Vercel's Git
+# integration independently — this job only touches Supabase (migrations +
+# edge functions), keeping each side under its own timeout.
+name: deploy-dev
+
+on:
+  push:
+    branches: [dev]
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    env:
+      DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_DEV }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dopplerhq/cli-action@v3
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest # TODO: pin once the pipeline is stable
+
+      - name: Push migrations
+        run: |
+          doppler run -- bash -euo pipefail -c '
+            export SUPABASE_ACCESS_TOKEN="$NEXT_SUPABASE_PAT"
+            supabase link --project-ref "$NEXT_SUPABASE_PROJECT_REF" --password "$NEXT_SUPABASE_DB_PASSWORD"
+            supabase db push --password "$NEXT_SUPABASE_DB_PASSWORD"
+          '
+
+      - name: Deploy edge functions (if any)
+        run: |
+          if ls supabase/functions/*/index.ts >/dev/null 2>&1; then
+            doppler run -- bash -euo pipefail -c '
+              export SUPABASE_ACCESS_TOKEN="$NEXT_SUPABASE_PAT"
+              supabase functions deploy --project-ref "$NEXT_SUPABASE_PROJECT_REF"
+            '
+          else
+            echo "No edge functions to deploy."
+          fi

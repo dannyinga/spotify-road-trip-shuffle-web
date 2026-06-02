@@ -39,3 +39,13 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+important-info.txt
+
+# playwright
+/test-results/
+/playwright-report/
+/playwright/.cache/
+
+# supabase (local CLI state — keep migrations, ignore temp)
+/supabase/.temp/
+/supabase/.branches/
