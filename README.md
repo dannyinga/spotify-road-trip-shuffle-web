@@ -67,6 +67,7 @@ npm run db:migrate:check          # supabase db lint
 - [x] React Query provider wired into the root layout
 - [x] `roadTripShuffle` pure algorithm + Vitest suite
 - [x] First migration: `shuffle_recipes` table with owner-only RLS
+- [x] CI/CD pipeline: dev/stg/prd gates + backend deploys, verified end-to-end
 - [ ] Spotify OAuth login flow
 - [ ] Read playlist → shuffle → write-back Route Handler
 - [ ] Recipe save/list UI
