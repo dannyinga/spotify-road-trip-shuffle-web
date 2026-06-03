@@ -10,6 +10,6 @@ export const config = {
     /*
      * Run on all paths except static assets and image optimization files.
      */
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|_next/webpack-hmr|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
