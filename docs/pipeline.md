@@ -44,11 +44,13 @@ The deploy workflows run on `push` (i.e. *after* a PR merges into a long-lived
 branch). The gates run on `pull_request`, so nothing reaches a protected branch
 until the checks are green.
 
-> **Branch-protection setup.** Set the required status checks to the job names
-> above: `dev` requires **QA Gate 1**; `stg` requires **QA Gate 1** + **QA Gate
-> 2**; `prd` requires **QA Gate 1** + **QA Gate 2** + **QA Gate 3** (and keep the
-> `production` Environment reviewer). These names changed when `ci.yml`/`e2e.yml`
-> were replaced by the three named gate workflows.
+> **Branch-protection setup.** Each gate workflow is self-contained (it re-runs
+> the foundational checks plus its own extra rigor) and only triggers on PRs
+> into its own branch, so each branch requires exactly **one** check — its own
+> gate: `dev` requires **QA Gate 1**; `stg` requires **QA Gate 2**; `prd`
+> requires **QA Gate 3** (and keep the `production` Environment reviewer). These
+> contexts replace the old `quality` / `playwright` ones from `ci.yml` /
+> `e2e.yml`.
 
 ## Deployment tests (post-deploy validation)
 
