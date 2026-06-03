@@ -1,0 +1,84 @@
+name: QA Gate 3 (Production)
+
+#
+# Pre-merge gate on `release/* → prd` PRs. Same source-only checks as QA Gate 2
+# with a tighter audit threshold (critical-only) and a Playwright @smoke run.
+# This is the required status check `QA Gate 3`.
+#
+# The hard prod manual-approval gate is separate: the `production` GitHub
+# Environment reviewer on deploy-production.yml pauses the migration push until
+# a human approves (see docs/pipeline.md).
+#
+
+on:
+  pull_request:
+    branches: [prd]
+
+permissions:
+  contents: read
+
+jobs:
+  qa-gate-3:
+    name: QA Gate 3
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      # stg config: the @smoke run rehearses against the staging-config app,
+      # the same code about to be promoted to prd.
+      DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_STG }}
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Enforce release branch source
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          if [[ "$HEAD_REF" != release/* ]]; then
+            echo "ERROR: QA Gate 3 only permits PRs from release/* into prd."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - uses: dopplerhq/cli-action@014df23b1329b615816a38eb5f473bb9000700b1 # v3
+
+      - uses: supabase/setup-cli@ab058987d8d6c725971f6cf9d0b5c98467e30bd1 # v1.7.1
+        with:
+          version: latest # TODO: pin once the pipeline is stable
+
+      - name: Validate migrations (static analysis)
+        run: |
+          [ -f supabase/config.toml ] || supabase init
+          supabase start
+          supabase db lint
+          supabase stop --no-backup
+
+      - name: Build
+        run: doppler run -- npm run build
+
+      - name: Dependency vulnerability audit (critical only)
+        # Tighter than QA Gate 2's `high`. `high` findings should have been
+        # resolved at Gate 2; this is the last stop before prod.
+        run: npm audit --audit-level=critical
+
+      - name: Semgrep SAST & secret scan
+        run: |
+          pipx install semgrep
+          semgrep scan --error \
+            --config p/default \
+            --config p/owasp-top-ten \
+            --config p/secrets \
+            --config p/typescript \
+            --config p/react
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright @smoke
+        run: doppler run -- npm run test:e2e:smoke

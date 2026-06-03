@@ -1,0 +1,55 @@
+name: Post-Deploy Health Check
+
+#
+# Fast curl smoke after a push to `prd`. Runs in parallel to
+# deploy-production.yml's heavier post-deploy validation (Playwright +
+# Lighthouse) so a broken deploy surfaces a sub-5-minute fail signal even while
+# the e2e suite is still warming up browsers.
+#
+# Two checks against the deployed site (URL from the prd Doppler config):
+#   - Home page (/) returns 200
+#   - Health endpoint (/api/health) returns 200
+#
+# Any non-200 is a hard fail. NEXT_PUBLIC_SITE_URL is required.
+#
+
+on:
+  push:
+    branches: [prd]
+
+jobs:
+  health-check:
+    name: Production Health Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_PRD }}
+    steps:
+      - uses: dopplerhq/cli-action@014df23b1329b615816a38eb5f473bb9000700b1 # v3
+
+      - name: Wait for Vercel deployment
+        # 30s covers a typical Vercel publish. deploy-production.yml's
+        # post-deploy-validation has its own 10-minute poll for slower cases;
+        # this is the fast-signal companion.
+        run: sleep 30
+
+      - name: Curl health checks
+        run: |
+          doppler run -- bash -euo pipefail -c '
+            base="${NEXT_PUBLIC_SITE_URL:-}"
+            if [ -z "$base" ]; then
+              echo "ERROR: NEXT_PUBLIC_SITE_URL is not set in the prd Doppler config."
+              exit 1
+            fi
+            base="${base%/}"
+
+            home=$(curl -s -o /dev/null -w "%{http_code}" "$base/")
+            echo "Home page status: $home"
+            [ "$home" = "200" ] || { echo "ERROR: home page returned $home"; exit 1; }
+
+            health=$(curl -s -o /dev/null -w "%{http_code}" "$base/api/health")
+            echo "Health endpoint status: $health"
+            [ "$health" = "200" ] || { echo "ERROR: /api/health returned $health"; exit 1; }
+
+            echo "Production health checks passed."
+          '
