@@ -24,9 +24,6 @@ jobs:
     timeout-minutes: 5
     env:
       DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_PRD }}
-      # Harmless on the unprotected prod URL; sent for parity with the
-      # post-deploy-validation jobs in case prod ever gets Deployment Protection.
-      VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
     steps:
       - uses: dopplerhq/cli-action@014df23b1329b615816a38eb5f473bb9000700b1 # v3
 

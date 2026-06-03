@@ -99,15 +99,20 @@ Supabase project and change that one Doppler var — no workflow edits needed.
 
 ## GitHub Actions secrets
 
-One Doppler **service token** per config, stored as a repo secret:
-`DOPPLER_TOKEN_DEV`, `DOPPLER_TOKEN_STG`, `DOPPLER_TOKEN_PRD`.
+The **only** GitHub Actions secrets are the Doppler service tokens — one per
+config: `DOPPLER_TOKEN_DEV`, `DOPPLER_TOKEN_STG`, `DOPPLER_TOKEN_PRD`. They're
+the bootstrap credential the workflows use to auth to Doppler, so they can't
+themselves come from Doppler.
 
-Plus `VERCEL_AUTOMATION_BYPASS_SECRET` — the post-deploy jobs send it as the
-`x-vercel-protection-bypass` header so they can reach Vercel preview
-deployments that have Deployment Protection on (the `stg` URL returns 401
-otherwise). Get the value from Vercel → Project → Settings → Deployment
-Protection → **Protection Bypass for Automation**. Harmless on the unprotected
-prod URL.
+Every other secret lives in **Doppler** (single source of truth) and is fetched
+at runtime — `doppler run` injects it, or a step reads it with
+`doppler secrets get <NAME> --plain`. That includes
+`VERCEL_AUTOMATION_BYPASS_SECRET`: the post-deploy jobs read it from Doppler and
+send it as the `x-vercel-protection-bypass` header to reach Vercel preview
+deployments with Deployment Protection on (the `stg` URL returns 401 otherwise).
+Get the value from Vercel → Project → Settings → Deployment Protection →
+**Protection Bypass for Automation**, then store it in Doppler — at minimum the
+`stg` config (the protected preview). Harmless/absent on the unprotected prod URL.
 
 ## TODO
 
