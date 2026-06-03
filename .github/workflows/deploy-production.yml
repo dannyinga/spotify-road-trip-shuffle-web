@@ -73,6 +73,10 @@ jobs:
     timeout-minutes: 30
     env:
       DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_PRD }}
+      # Harmless on the unprotected prod URL, but kept symmetric with
+      # deploy-staging.yml so a future protected prod deploy still works. Value:
+      # Vercel → Settings → Deployment Protection → Protection Bypass for Automation.
+      VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -86,6 +90,8 @@ jobs:
       - name: Resolve deployed base URL
         # NEXT_PUBLIC_SITE_URL lives in the prd Doppler config. Hard requirement:
         # fail loudly if unset rather than silently skipping validation.
+        # Strip any trailing slash so downstream "$BASE_URL/" can't become "//"
+        # (Vercel 308-redirects "//", which would fail the 200 poll).
         run: |
           BASE_URL="$(doppler secrets get NEXT_PUBLIC_SITE_URL --plain)"
           if [ -z "$BASE_URL" ] || [ "$BASE_URL" = "null" ]; then
@@ -93,6 +99,7 @@ jobs:
             echo "Post-deploy validation runs against the deployed URL; set it to continue."
             exit 1
           fi
+          BASE_URL="${BASE_URL%/}"
           echo "BASE_URL=$BASE_URL" >> "$GITHUB_ENV"
           echo "PLAYWRIGHT_BASE_URL=$BASE_URL" >> "$GITHUB_ENV"
 
@@ -101,7 +108,9 @@ jobs:
           set -euo pipefail
           echo "Polling $BASE_URL for readiness..."
           for i in $(seq 1 60); do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/")
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "x-vercel-protection-bypass: ${VERCEL_AUTOMATION_BYPASS_SECRET}" \
+              "$BASE_URL/")
             if [ "$STATUS" = "200" ]; then
               echo "Production responding 200 after ${i} attempts"
               exit 0

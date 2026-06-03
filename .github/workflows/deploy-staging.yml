@@ -48,6 +48,11 @@ jobs:
     timeout-minutes: 30
     env:
       DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_STG }}
+      # stg is a Vercel preview deployment with Deployment Protection on, so it
+      # returns 401 without this bypass header. Get the value from Vercel:
+      # Project → Settings → Deployment Protection → Protection Bypass for
+      # Automation. Harmless on unprotected URLs (Vercel ignores empty values).
+      VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -61,6 +66,8 @@ jobs:
       - name: Resolve deployed base URL
         # NEXT_PUBLIC_SITE_URL lives in the stg Doppler config. Hard requirement:
         # fail loudly if it's unset rather than silently skipping validation.
+        # Strip any trailing slash so downstream "$BASE_URL/" can't become "//"
+        # (Vercel 308-redirects "//", which would fail the 200 poll).
         run: |
           BASE_URL="$(doppler secrets get NEXT_PUBLIC_SITE_URL --plain)"
           if [ -z "$BASE_URL" ] || [ "$BASE_URL" = "null" ]; then
@@ -68,18 +75,22 @@ jobs:
             echo "Post-deploy validation runs against the deployed URL; set it to continue."
             exit 1
           fi
+          BASE_URL="${BASE_URL%/}"
           echo "BASE_URL=$BASE_URL" >> "$GITHUB_ENV"
           echo "PLAYWRIGHT_BASE_URL=$BASE_URL" >> "$GITHUB_ENV"
 
       - name: Wait for deployment to settle
         # Supabase backend deploy is fast; Vercel may still be building. Poll the
         # URL until it serves 200 so the e2e suite hits the new code. 10-minute
-        # budget covers a typical Vercel build.
+        # budget covers a typical Vercel build. The bypass header gets us past
+        # Deployment Protection on the preview URL.
         run: |
           set -euo pipefail
           echo "Polling $BASE_URL for readiness..."
           for i in $(seq 1 60); do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/")
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "x-vercel-protection-bypass: ${VERCEL_AUTOMATION_BYPASS_SECRET}" \
+              "$BASE_URL/")
             if [ "$STATUS" = "200" ]; then
               echo "Staging responding 200 after ${i} attempts"
               exit 0

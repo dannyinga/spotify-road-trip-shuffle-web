@@ -24,6 +24,9 @@ jobs:
     timeout-minutes: 5
     env:
       DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_PRD }}
+      # Harmless on the unprotected prod URL; sent for parity with the
+      # post-deploy-validation jobs in case prod ever gets Deployment Protection.
+      VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
     steps:
       - uses: dopplerhq/cli-action@014df23b1329b615816a38eb5f473bb9000700b1 # v3
 
@@ -42,12 +45,13 @@ jobs:
               exit 1
             fi
             base="${base%/}"
+            hdr="x-vercel-protection-bypass: ${VERCEL_AUTOMATION_BYPASS_SECRET:-}"
 
-            home=$(curl -s -o /dev/null -w "%{http_code}" "$base/")
+            home=$(curl -s -o /dev/null -w "%{http_code}" -H "$hdr" "$base/")
             echo "Home page status: $home"
             [ "$home" = "200" ] || { echo "ERROR: home page returned $home"; exit 1; }
 
-            health=$(curl -s -o /dev/null -w "%{http_code}" "$base/api/health")
+            health=$(curl -s -o /dev/null -w "%{http_code}" -H "$hdr" "$base/api/health")
             echo "Health endpoint status: $health"
             [ "$health" = "200" ] || { echo "ERROR: /api/health returned $health"; exit 1; }
 

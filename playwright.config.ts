@@ -14,6 +14,11 @@ import { defineConfig, devices } from "@playwright/test";
  */
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3000";
 
+// When running against a protected Vercel preview (e.g. the stg deployment),
+// send the automation bypass header so navigations get past Deployment
+// Protection. Unset for local runs — undefined leaves headers untouched.
+const bypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
@@ -23,6 +28,12 @@ export default defineConfig({
   use: {
     baseURL,
     trace: "on-first-retry",
+    extraHTTPHeaders: bypass
+      ? {
+          "x-vercel-protection-bypass": bypass,
+          "x-vercel-set-bypass-cookie": "true",
+        }
+      : undefined,
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: process.env.PLAYWRIGHT_BASE_URL
