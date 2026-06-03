@@ -71,7 +71,7 @@ export async function getSpotifyAccessToken(userId: string): Promise<string> {
 
   if (!response.ok) {
     const errorBody = await response.text();
-    console.error(`Failed to refresh Spotify token: Status ${response.status}`, errorBody);
+    console.error("Failed to refresh Spotify token: Status", response.status, errorBody);
     throw new Error(`Failed to refresh Spotify token: ${response.statusText}`);
   }
 
@@ -111,7 +111,7 @@ export async function getSpotifyUserProfile(accessToken: string): Promise<Spotif
 
   if (!response.ok) {
     const errorBody = await response.text();
-    console.error(`Failed to fetch Spotify user profile: Status ${response.status}`, errorBody);
+    console.error("Failed to fetch Spotify user profile: Status", response.status, errorBody);
     throw new Error(`Failed to fetch Spotify user profile: ${response.statusText}`);
   }
 
@@ -145,7 +145,7 @@ export async function getUserPlaylists(accessToken: string): Promise<SpotifyPlay
 
   if (!response.ok) {
     const errorBody = await response.text();
-    console.error(`Failed to fetch playlists: Status ${response.status}`, errorBody);
+    console.error("Failed to fetch playlists: Status", response.status, errorBody);
     throw new Error(`Failed to fetch playlists: ${response.statusText}`);
   }
 
@@ -173,7 +173,7 @@ export async function getPlaylistTracks(
 
     if (!response.ok) {
       const errorBody = await response.text();
-      console.error(`Failed to fetch playlist tracks: Status ${response.status}`, errorBody);
+      console.error("Failed to fetch playlist tracks: Status", response.status, errorBody);
       throw new Error(`Failed to fetch playlist tracks: ${response.statusText}`);
     }
 
@@ -220,7 +220,7 @@ export async function createPlaylist(
 
   if (!response.ok) {
     const errorBody = await response.text();
-    console.error(`Failed to create playlist: Status ${response.status}`, errorBody);
+    console.error("Failed to create playlist: Status", response.status, errorBody);
     throw new Error(`Failed to create playlist: ${response.statusText}`);
   }
 
@@ -250,7 +250,7 @@ export async function addTracksToPlaylist(
 
     if (!response.ok) {
       const errorBody = await response.text();
-      console.error(`Failed to add tracks to playlist chunk (index ${i}): Status ${response.status}`, errorBody);
+      console.error("Failed to add tracks to playlist chunk (index", i, "): Status", response.status, errorBody);
       throw new Error(`Failed to add tracks to playlist chunk: ${response.statusText}`);
     }
   }
