@@ -9,6 +9,7 @@ import {
   addTracksToPlaylist,
 } from "@/lib/spotify";
 import { roadTripShuffle } from "@/lib/shuffle/road-trip-shuffle";
+import { poolTracksByWeight } from "@/lib/shuffle/pool-tracks";
 
 const MAX_TOTAL_TRACKS = 1000;
 
@@ -72,8 +73,7 @@ export async function POST(request: Request) {
     }
 
     // 4. Fetch tracks for all members (using Admin Client to bypass RLS for other members' tokens)
-    const membersTracks = [];
-    let totalWeight = 0;
+    const memberGroups = [];
 
     for (const member of activeMembers) {
       try {
@@ -82,11 +82,7 @@ export async function POST(request: Request) {
         const tracks = await getPlaylistTracks(token, member.spotify_playlist_id!);
 
         if (tracks.length > 0) {
-          membersTracks.push({
-            member,
-            tracks,
-          });
-          totalWeight += member.weight;
+          memberGroups.push({ weight: member.weight, tracks });
         }
       } catch (err) {
         console.error("Failed to load tracks for member:", member.user_id, err);
@@ -94,28 +90,16 @@ export async function POST(request: Request) {
       }
     }
 
-    if (membersTracks.length === 0) {
+    if (memberGroups.length === 0) {
       return NextResponse.json(
         { error: "No valid tracks could be retrieved from any member's playlist." },
         { status: 400 }
       );
     }
 
-    // 5. Pool tracks proportionally based on weights if total exceeds 300, otherwise include everything
-    const totalTracksRaw = membersTracks.reduce((acc, item) => acc + item.tracks.length, 0);
-    const pooledTracks = [];
-
-    if (totalTracksRaw <= MAX_TOTAL_TRACKS) {
-      for (const item of membersTracks) {
-        pooledTracks.push(...item.tracks);
-      }
-    } else {
-      for (const item of membersTracks) {
-        const share = Math.floor(MAX_TOTAL_TRACKS * (item.member.weight / totalWeight));
-        const count = Math.min(item.tracks.length, share);
-        pooledTracks.push(...item.tracks.slice(0, count));
-      }
-    }
+    // 5. Pool tracks proportionally by weight when over the cap; otherwise
+    // include every track. (Pure logic lives in poolTracksByWeight.)
+    const pooledTracks = poolTracksByWeight(memberGroups, MAX_TOTAL_TRACKS);
 
     if (pooledTracks.length === 0) {
       return NextResponse.json(
