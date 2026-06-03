@@ -89,7 +89,7 @@ export async function POST(request: Request) {
           totalWeight += member.weight;
         }
       } catch (err) {
-        console.error(`Failed to load tracks for member ${member.user_id}:`, err);
+        console.error("Failed to load tracks for member:", member.user_id, err);
         // Continue loading other members' tracks rather than crashing entirely
       }
     }
