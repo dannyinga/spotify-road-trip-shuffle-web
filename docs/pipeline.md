@@ -59,7 +59,10 @@ job against the **deployed** site: poll the URL until it serves 200, run the ful
 Playwright suite against it, then a Lighthouse audit (`lighthouserc.cjs`). On
 `prd`, `post-deploy-health.yml` runs a faster curl smoke (`/` and `/api/health`)
 in parallel for a sub-5-minute fail signal. These jobs **require**
-`NEXT_PUBLIC_SITE_URL` in the relevant Doppler config and fail if it's unset.
+`NEXT_PUBLIC_SITE_URL` in the relevant Doppler config and fail if it's unset
+(any trailing slash is stripped so `…/` never becomes `…//`). They send the
+`x-vercel-protection-bypass` header (`VERCEL_AUTOMATION_BYPASS_SECRET`) to get
+past Deployment Protection on protected preview URLs like `stg`.
 
 ## Hard rules (inherited from Vine)
 
@@ -98,6 +101,13 @@ Supabase project and change that one Doppler var — no workflow edits needed.
 
 One Doppler **service token** per config, stored as a repo secret:
 `DOPPLER_TOKEN_DEV`, `DOPPLER_TOKEN_STG`, `DOPPLER_TOKEN_PRD`.
+
+Plus `VERCEL_AUTOMATION_BYPASS_SECRET` — the post-deploy jobs send it as the
+`x-vercel-protection-bypass` header so they can reach Vercel preview
+deployments that have Deployment Protection on (the `stg` URL returns 401
+otherwise). Get the value from Vercel → Project → Settings → Deployment
+Protection → **Protection Bypass for Automation**. Harmless on the unprotected
+prod URL.
 
 ## TODO
 
