@@ -1,0 +1,84 @@
+name: QA Gate 2 (Staging)
+
+#
+# Pre-merge gate on `release/* → stg` PRs. Everything QA Gate 1 covers in
+# spirit, plus a Playwright e2e run (the app is booted locally under Doppler so
+# it's still source-only — no deployed env needed) and a Semgrep SAST pass.
+# This is the required status check `QA Gate 2`.
+#
+# The `stg` Doppler config currently points NEXT_SUPABASE_PROJECT_REF at the
+# dev Supabase project (free-tier compromise — see docs/pipeline.md).
+#
+
+on:
+  pull_request:
+    branches: [stg]
+
+permissions:
+  contents: read
+
+jobs:
+  qa-gate-2:
+    name: QA Gate 2
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_STG }}
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Enforce release branch source
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          if [[ "$HEAD_REF" != release/* ]]; then
+            echo "ERROR: QA Gate 2 only permits PRs from release/* into stg."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - uses: dopplerhq/cli-action@014df23b1329b615816a38eb5f473bb9000700b1 # v3
+
+      - uses: supabase/setup-cli@ab058987d8d6c725971f6cf9d0b5c98467e30bd1 # v1.7.1
+        with:
+          version: latest # TODO: pin once the pipeline is stable
+
+      - name: Validate migrations (static analysis)
+        run: |
+          [ -f supabase/config.toml ] || supabase init
+          supabase start
+          supabase db lint
+          supabase stop --no-backup
+
+      - name: Build
+        run: doppler run -- npm run build
+
+      - name: Dependency vulnerability audit
+        run: npm audit --audit-level=high
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright e2e
+        # Playwright boots the app itself (webServer in playwright.config.ts).
+        # The outer `doppler run` injects env the spawned dev server inherits.
+        run: doppler run -- npm run test:e2e
+
+      - name: Semgrep SAST & secret scan
+        # CLI form (no SEMGREP_APP_TOKEN needed). `--error` makes any finding a
+        # hard gate. Same rulesets as Vine's qa-staging/qa-production gates.
+        run: |
+          pipx install semgrep
+          semgrep scan --error \
+            --config p/default \
+            --config p/owasp-top-ten \
+            --config p/secrets \
+            --config p/typescript \
+            --config p/react

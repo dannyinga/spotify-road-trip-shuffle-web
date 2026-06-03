@@ -1,6 +1,18 @@
-# Backend deploy for production. The `environment: production` line is QA Gate 3:
-# add a required reviewer to the "production" GitHub Environment and this job
-# pauses for manual approval before any migration touches prod.
+# Push-to-prd pipeline. Two jobs:
+#
+#   1. backend — applies migrations + deploys edge functions to the prod
+#      Supabase project, then a fast Supabase Auth health check. The
+#      `environment: production` line is the hard manual gate: add a required
+#      reviewer to the "production" GitHub Environment and this job pauses for
+#      approval before any migration touches prod.
+#
+#   2. post-deploy-validation — "deployment tests" against the live prod URL:
+#      full Playwright e2e + Lighthouse, same shape as deploy-staging.yml.
+#      NEXT_PUBLIC_SITE_URL is a hard requirement. The companion
+#      post-deploy-health.yml runs a faster curl smoke in parallel.
+#
+# If post-deploy-validation fails, prod already has the deploy (no auto-
+# rollback) — the workflow exits red so it's seen. Cut a hotfix or revert.
 name: deploy-production
 
 on:
@@ -18,9 +30,9 @@ jobs:
     env:
       DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_PRD }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dopplerhq/cli-action@v3
-      - uses: supabase/setup-cli@v1
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dopplerhq/cli-action@014df23b1329b615816a38eb5f473bb9000700b1 # v3
+      - uses: supabase/setup-cli@ab058987d8d6c725971f6cf9d0b5c98467e30bd1 # v1.7.1
         with:
           version: latest
 
@@ -43,7 +55,7 @@ jobs:
             echo "No edge functions to deploy."
           fi
 
-      - name: Post-deploy health
+      - name: Post-deploy health (Supabase Auth)
         run: |
           doppler run -- bash -euo pipefail -c '
             # Strip any trailing slash so we never build a "//" path, and hit
@@ -53,3 +65,91 @@ jobs:
               -H "apikey: $NEXT_PUBLIC_SUPABASE_ANON_KEY" > /dev/null \
               && echo "Supabase Auth healthy."
           '
+
+  post-deploy-validation:
+    name: Post-Deploy Validation (Production)
+    needs: backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_PRD }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: dopplerhq/cli-action@014df23b1329b615816a38eb5f473bb9000700b1 # v3
+      - run: npx playwright install --with-deps chromium
+
+      - name: Resolve deployed base URL + bypass secret from Doppler
+        # NEXT_PUBLIC_SITE_URL lives in the prd Doppler config. Hard requirement:
+        # fail loudly if unset rather than silently skipping validation.
+        # Strip any trailing slash so downstream "$BASE_URL/" can't become "//"
+        # (Vercel 308-redirects "//", which would fail the 200 poll).
+        #
+        # Fetch the Vercel automation-bypass secret from Doppler too (single
+        # source of truth) and export it masked to $GITHUB_ENV. Prod is
+        # unprotected today so it's typically absent here — that's fine, the
+        # header is just empty. Only DOPPLER_TOKEN_* need to be GitHub secrets.
+        run: |
+          BASE_URL="$(doppler secrets get NEXT_PUBLIC_SITE_URL --plain)"
+          if [ -z "$BASE_URL" ] || [ "$BASE_URL" = "null" ]; then
+            echo "ERROR: NEXT_PUBLIC_SITE_URL is not set in the prd Doppler config."
+            echo "Post-deploy validation runs against the deployed URL; set it to continue."
+            exit 1
+          fi
+          BASE_URL="${BASE_URL%/}"
+          echo "BASE_URL=$BASE_URL" >> "$GITHUB_ENV"
+          echo "PLAYWRIGHT_BASE_URL=$BASE_URL" >> "$GITHUB_ENV"
+
+          BYPASS="$(doppler secrets get VERCEL_AUTOMATION_BYPASS_SECRET --plain 2>/dev/null || true)"
+          if [ -n "$BYPASS" ] && [ "$BYPASS" != "null" ]; then
+            echo "::add-mask::$BYPASS"
+          else
+            BYPASS=""
+          fi
+          echo "VERCEL_AUTOMATION_BYPASS_SECRET=$BYPASS" >> "$GITHUB_ENV"
+
+      - name: Wait for deployment to settle
+        run: |
+          set -euo pipefail
+          echo "Polling $BASE_URL for readiness..."
+          for i in $(seq 1 60); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "x-vercel-protection-bypass: ${VERCEL_AUTOMATION_BYPASS_SECRET}" \
+              "$BASE_URL/")
+            if [ "$STATUS" = "200" ]; then
+              echo "Production responding 200 after ${i} attempts"
+              exit 0
+            fi
+            echo "Attempt ${i}: got ${STATUS}, retrying in 10s..."
+            sleep 10
+          done
+          echo "ERROR: production never returned 200 within 10 minutes"
+          exit 1
+
+      - name: Run e2e against deployed production
+        run: npx playwright test
+
+      - name: Upload Playwright artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4 # TODO: pin to SHA once the pipeline is stable
+        with:
+          name: playwright-production-failure
+          path: |
+            playwright-report
+            test-results
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Lighthouse audit
+        # The action bundles its own Chrome (a bare `npx @lhci/cli` would need
+        # system Chrome the runner doesn't have). Assertions come from
+        # lighthouserc.cjs (warn-level to start).
+        uses: treosh/lighthouse-ci-action@v12 # TODO: pin to SHA once the pipeline is stable
+        with:
+          urls: "${{ env.BASE_URL }}/"
+          configPath: ./lighthouserc.cjs
+          uploadArtifacts: true

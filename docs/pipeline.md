@@ -12,32 +12,57 @@ work/* | fix/* | product/*
 release/<vX.Y.Z>
    │
    ▼
-  stg          ← deploy-staging.yml (backend + post-deploy smoke). QA Gate 2 on release/* → stg.
+  stg          ← deploy-staging.yml (backend + post-deploy validation). QA Gate 2 on release/* → stg.
    │
    ▼
 release/<vX.Y.Z>
    │
    ▼
-  prd          ← deploy-production.yml (backend + health). QA Gate 3 on release/* → prd.
-   │
+  prd          ← deploy-production.yml (backend + post-deploy validation),
+   │             post-deploy-health.yml (fast curl smoke). QA Gate 3 on release/* → prd.
    ▼
-sync/prd-to-dev-<vX.Y.Z>    ← MANDATORY back-merge after every prod release.
+sync/prd-to-dev-<sha>    ← MANDATORY back-merge, opened automatically by
+                            sync-prd-to-dev.yml after every prod release.
 ```
 
 Long-lived branches are named to match the environments and Doppler configs:
 `dev` / `stg` / `prd`. `prd` is the repo's default/production branch.
 
-## The QA gates are branch protection, not scripts
+## The QA gates are workflows enforced by branch protection
 
-| Gate | Where | Enforced by | Runs |
-| ---- | ----- | ----------- | ---- |
-| **Gate 1** | PR → `dev` | Required check `ci / quality` | lint, typecheck, unit tests |
-| **Gate 2** | PR `release/*` → `stg` | Required checks `ci / quality` + `e2e / playwright` | + Playwright e2e |
-| **Gate 3** | PR `release/*` → `prd` | Gate 2 checks **+** `production` Environment reviewer | + manual approval before prod migration |
+Each gate is its own workflow (`qa-dev.yml` / `qa-staging.yml` / `qa-production.yml`),
+mirroring Vine. The job name is the required-status-check name in branch
+protection.
+
+| Gate | Where | Workflow / required check | Runs |
+| ---- | ----- | ------------------------- | ---- |
+| **Gate 1** | PR → `dev` | `qa-dev.yml` → **QA Gate 1** | env contract, lint, typecheck, build, unit tests, `npm audit --high`, migration lint, edge-fn check |
+| **Gate 2** | PR `release/*` → `stg` | `qa-staging.yml` → **QA Gate 2** | release-branch enforcement, build, `npm audit --high`, migration lint, Playwright e2e, Semgrep SAST |
+| **Gate 3** | PR `release/*` → `prd` | `qa-production.yml` → **QA Gate 3** + `production` Environment reviewer | Gate 2 checks with `npm audit --critical`, Playwright @smoke, **+ manual approval** before the prod migration (the Environment reviewer on `deploy-production.yml`) |
 
 The deploy workflows run on `push` (i.e. *after* a PR merges into a long-lived
 branch). The gates run on `pull_request`, so nothing reaches a protected branch
 until the checks are green.
+
+> **Branch-protection setup.** Each gate workflow is self-contained (it re-runs
+> the foundational checks plus its own extra rigor) and only triggers on PRs
+> into its own branch, so each branch requires exactly **one** check — its own
+> gate: `dev` requires **QA Gate 1**; `stg` requires **QA Gate 2**; `prd`
+> requires **QA Gate 3** (and keep the `production` Environment reviewer). These
+> contexts replace the old `quality` / `playwright` ones from `ci.yml` /
+> `e2e.yml`.
+
+## Deployment tests (post-deploy validation)
+
+After a merge lands on `stg`/`prd`, `deploy-*.yml` runs a `post-deploy-validation`
+job against the **deployed** site: poll the URL until it serves 200, run the full
+Playwright suite against it, then a Lighthouse audit (`lighthouserc.cjs`). On
+`prd`, `post-deploy-health.yml` runs a faster curl smoke (`/` and `/api/health`)
+in parallel for a sub-5-minute fail signal. These jobs **require**
+`NEXT_PUBLIC_SITE_URL` in the relevant Doppler config and fail if it's unset
+(any trailing slash is stripped so `…/` never becomes `…//`). They send the
+`x-vercel-protection-bypass` header (`VERCEL_AUTOMATION_BYPASS_SECRET`) to get
+past Deployment Protection on protected preview URLs like `stg`.
 
 ## Hard rules (inherited from Vine)
 
@@ -65,7 +90,7 @@ Supabase project and change that one Doppler var — no workflow edits needed.
 | `NEXT_SUPABASE_PAT` | Supabase personal access token (CLI auth in CI) |
 | `NEXT_SUPABASE_PROJECT_REF` | which project this env deploys to |
 | `NEXT_SUPABASE_DB_PASSWORD` | DB password for `supabase link`/`db push` |
-| `NEXT_PUBLIC_SITE_URL` | (optional) deployed URL for post-deploy smoke |
+| `NEXT_PUBLIC_SITE_URL` | deployed URL — **required** by post-deploy validation + health (stg/prd) |
 | `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` | added when we build auth |
 
 > Doppler reserves the bare `SUPABASE_*` prefix for its own integration, so our
@@ -74,11 +99,34 @@ Supabase project and change that one Doppler var — no workflow edits needed.
 
 ## GitHub Actions secrets
 
-One Doppler **service token** per config, stored as a repo secret:
-`DOPPLER_TOKEN_DEV`, `DOPPLER_TOKEN_STG`, `DOPPLER_TOKEN_PRD`.
+The **only** GitHub Actions secrets are the Doppler service tokens — one per
+config: `DOPPLER_TOKEN_DEV`, `DOPPLER_TOKEN_STG`, `DOPPLER_TOKEN_PRD`. They're
+the bootstrap credential the workflows use to auth to Doppler, so they can't
+themselves come from Doppler.
+
+Every other secret lives in **Doppler** (single source of truth) and is fetched
+at runtime — `doppler run` injects it, or a step reads it with
+`doppler secrets get <NAME> --plain`. That includes
+`VERCEL_AUTOMATION_BYPASS_SECRET`: the post-deploy jobs read it from Doppler and
+send it as the `x-vercel-protection-bypass` header to reach Vercel preview
+deployments with Deployment Protection on (the `stg` URL returns 401 otherwise).
+Get the value from Vercel → Project → Settings → Deployment Protection →
+**Protection Bypass for Automation**, then store it in Doppler — at minimum the
+`stg` config (the protected preview). Harmless/absent on the unprotected prod URL.
 
 ## TODO
 
-- Lighthouse CI on the staging gate (Vine runs it post-deploy; not wired here yet).
-- Post-deploy Playwright against the live staging URL once the Vercel domain is set.
-- Pin `supabase/setup-cli` to a fixed version.
+- Pin `supabase/setup-cli` and `actions/upload-artifact` to fixed SHAs once the
+  pipeline is stable.
+- Tighten `lighthouserc.cjs` assertions from `warn` to `error` once the deployed
+  site has a real baseline (Vine's deploy-*.yml uses `error` thresholds).
+- Give `stg` its own Supabase project (currently shares dev's DB).
+
+## Done (mirrored from Vine)
+
+- Three named QA-gate workflows (`qa-dev` / `qa-staging` / `qa-production`),
+  replacing `ci.yml` + `e2e.yml`.
+- Post-deploy validation (Playwright + Lighthouse against the live URL) on
+  `stg`/`prd`, plus a fast `post-deploy-health.yml` curl smoke on `prd`.
+- Automatic `sync/prd-to-dev-<sha>` back-merge via `sync-prd-to-dev.yml`.
+- `/api/health` route + unit test, hit by the health check and the @smoke suite.
