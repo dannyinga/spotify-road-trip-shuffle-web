@@ -132,6 +132,9 @@ export default function Home() {
       options: {
         redirectTo: `${window.location.origin}/auth/callback`,
         scopes: "playlist-read-private playlist-read-collaborative playlist-modify-public playlist-modify-private user-read-private user-read-email",
+        queryParams: {
+          show_dialog: "true",
+        },
       },
     });
   };
