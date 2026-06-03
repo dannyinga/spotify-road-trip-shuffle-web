@@ -39,6 +39,74 @@ export type Database = {
   }
   public: {
     Tables: {
+      road_trip_members: {
+        Row: {
+          joined_at: string
+          role: string
+          spotify_playlist_id: string | null
+          spotify_playlist_name: string | null
+          spotify_playlist_track_count: number | null
+          trip_id: string
+          user_id: string
+          weight: number
+        }
+        Insert: {
+          joined_at?: string
+          role?: string
+          spotify_playlist_id?: string | null
+          spotify_playlist_name?: string | null
+          spotify_playlist_track_count?: number | null
+          trip_id: string
+          user_id: string
+          weight?: number
+        }
+        Update: {
+          joined_at?: string
+          role?: string
+          spotify_playlist_id?: string | null
+          spotify_playlist_name?: string | null
+          spotify_playlist_track_count?: number | null
+          trip_id?: string
+          user_id?: string
+          weight?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "road_trip_members_trip_id_fkey"
+            columns: ["trip_id"]
+            isOneToOne: false
+            referencedRelation: "road_trips"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      road_trips: {
+        Row: {
+          created_at: string
+          host_id: string
+          id: string
+          invite_code: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          host_id: string
+          id?: string
+          invite_code: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          host_id?: string
+          id?: string
+          invite_code?: string
+          name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       shuffle_recipes: {
         Row: {
           created_at: string
@@ -47,6 +115,7 @@ export type Database = {
           output_playlist_id: string | null
           seed: number
           source_playlist_id: string
+          trip_id: string | null
           updated_at: string
           user_id: string
         }
@@ -57,6 +126,7 @@ export type Database = {
           output_playlist_id?: string | null
           seed: number
           source_playlist_id: string
+          trip_id?: string | null
           updated_at?: string
           user_id?: string
         }
@@ -67,10 +137,19 @@ export type Database = {
           output_playlist_id?: string | null
           seed?: number
           source_playlist_id?: string
+          trip_id?: string | null
           updated_at?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "shuffle_recipes_trip_id_fkey"
+            columns: ["trip_id"]
+            isOneToOne: false
+            referencedRelation: "road_trips"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       spotify_tokens: {
         Row: {
@@ -104,7 +183,32 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      get_my_uid: {
+        Args: never
+        Returns: {
+          role: string
+          uid: string
+        }[]
+      }
+      get_road_trip_members: {
+        Args: { p_trip_id: string }
+        Returns: {
+          avatar_url: string
+          display_name: string
+          joined_at: string
+          role: string
+          spotify_playlist_id: string
+          spotify_playlist_name: string
+          spotify_playlist_track_count: number
+          user_id: string
+          weight: number
+        }[]
+      }
+      is_road_trip_member: {
+        Args: { p_trip_id: string; p_user_id: string }
+        Returns: boolean
+      }
+      join_road_trip: { Args: { invite_code: string }; Returns: string }
     }
     Enums: {
       [_ in never]: never
