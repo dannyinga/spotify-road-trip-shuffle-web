@@ -1,0 +1,84 @@
+name: QA Gate 1 (Dev)
+
+#
+# Pre-merge gate on PRs into `dev`. Source-only checks: things that can be
+# validated from the PR's code alone, without a deployed environment or any
+# secrets. This is the required status check `QA Gate 1`.
+#
+# Deployed-environment validation (Playwright against a live URL, Lighthouse)
+# does NOT belong here — by definition the PR's code isn't on a deployed env
+# yet. Those run from deploy-staging.yml / deploy-production.yml as post-deploy
+# jobs against the actually-deployed code.
+#
+
+on:
+  pull_request:
+    branches: [dev]
+
+permissions:
+  contents: read
+
+jobs:
+  qa-gate-1:
+    name: QA Gate 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    env:
+      # Dummy fallbacks let build / unit tests run with no secrets configured
+      # (forks, fresh clones). The Supabase clients read these lazily inside
+      # functions, so build-time inlining is safe with placeholder values.
+      NEXT_PUBLIC_SUPABASE_URL: "https://dummy.supabase.co"
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: "dummy-anon-key"
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Verify environment contract
+        # .env.local.example is the canonical contract for which env vars the
+        # app consumes. Failing here means a var was added without updating it.
+        run: |
+          if [ ! -f ".env.local.example" ]; then
+            echo "ERROR: .env.local.example is required for QA Gate 1."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm run test:unit
+
+      - name: Dependency vulnerability audit
+        run: npm audit --audit-level=high
+
+      - uses: supabase/setup-cli@ab058987d8d6c725971f6cf9d0b5c98467e30bd1 # v1.7.1
+        with:
+          version: latest # TODO: pin once the pipeline is stable
+
+      - name: Validate migrations (static analysis)
+        # `supabase db lint` needs a local Postgres to apply migrations against.
+        # `supabase start` spins up the local Docker stack; the runner is
+        # destroyed at job end so no explicit stop. `supabase init` is a no-op
+        # guard for the case where config.toml isn't present.
+        run: |
+          [ -f supabase/config.toml ] || supabase init
+          supabase start
+          supabase db lint
+
+      - name: Validate edge functions (type check)
+        # Spotify has no edge functions yet. Mirrors Vine's conditional so the
+        # check auto-activates the day a function with a deno.json lands.
+        run: |
+          if [ -f supabase/functions/deno.json ]; then
+            curl -fsSL https://deno.land/install.sh | sh
+            export PATH="$HOME/.deno/bin:$PATH"
+            deno check --config supabase/functions/deno.json supabase/functions/**/*.ts
+          else
+            echo "supabase/functions/deno.json not present; skipping deno check"
+          fi
