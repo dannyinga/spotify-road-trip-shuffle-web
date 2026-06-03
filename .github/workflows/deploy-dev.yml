@@ -23,11 +23,12 @@ jobs:
         with:
           version: latest # TODO: pin once the pipeline is stable
 
-      - name: Push migrations
+      - name: Push config & migrations
         run: |
           doppler run -- bash -euo pipefail -c '
             export SUPABASE_ACCESS_TOKEN="$NEXT_SUPABASE_PAT"
             supabase link --project-ref "$NEXT_SUPABASE_PROJECT_REF" --password "$NEXT_SUPABASE_DB_PASSWORD"
+            supabase config push --yes
             supabase db push --password "$NEXT_SUPABASE_DB_PASSWORD"
           '
 
