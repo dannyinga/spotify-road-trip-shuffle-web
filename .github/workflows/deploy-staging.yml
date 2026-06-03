@@ -48,11 +48,6 @@ jobs:
     timeout-minutes: 30
     env:
       DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_STG }}
-      # stg is a Vercel preview deployment with Deployment Protection on, so it
-      # returns 401 without this bypass header. Get the value from Vercel:
-      # Project → Settings → Deployment Protection → Protection Bypass for
-      # Automation. Harmless on unprotected URLs (Vercel ignores empty values).
-      VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -63,11 +58,17 @@ jobs:
       - uses: dopplerhq/cli-action@014df23b1329b615816a38eb5f473bb9000700b1 # v3
       - run: npx playwright install --with-deps chromium
 
-      - name: Resolve deployed base URL
+      - name: Resolve deployed base URL + bypass secret from Doppler
         # NEXT_PUBLIC_SITE_URL lives in the stg Doppler config. Hard requirement:
         # fail loudly if it's unset rather than silently skipping validation.
         # Strip any trailing slash so downstream "$BASE_URL/" can't become "//"
         # (Vercel 308-redirects "//", which would fail the 200 poll).
+        #
+        # The Vercel automation-bypass secret also lives in Doppler (single
+        # source of truth) — fetch it here and export to $GITHUB_ENV so the
+        # poll, Playwright, and Lighthouse (which read it from the process env)
+        # get past Deployment Protection on the stg preview. Masked so it never
+        # prints in logs. Only DOPPLER_TOKEN_* need to be GitHub Actions secrets.
         run: |
           BASE_URL="$(doppler secrets get NEXT_PUBLIC_SITE_URL --plain)"
           if [ -z "$BASE_URL" ] || [ "$BASE_URL" = "null" ]; then
@@ -78,6 +79,15 @@ jobs:
           BASE_URL="${BASE_URL%/}"
           echo "BASE_URL=$BASE_URL" >> "$GITHUB_ENV"
           echo "PLAYWRIGHT_BASE_URL=$BASE_URL" >> "$GITHUB_ENV"
+
+          BYPASS="$(doppler secrets get VERCEL_AUTOMATION_BYPASS_SECRET --plain 2>/dev/null || true)"
+          if [ -n "$BYPASS" ] && [ "$BYPASS" != "null" ]; then
+            echo "::add-mask::$BYPASS"
+          else
+            BYPASS=""
+            echo "::warning::VERCEL_AUTOMATION_BYPASS_SECRET not found in the stg Doppler config — the protected stg preview will 401."
+          fi
+          echo "VERCEL_AUTOMATION_BYPASS_SECRET=$BYPASS" >> "$GITHUB_ENV"
 
       - name: Wait for deployment to settle
         # Supabase backend deploy is fast; Vercel may still be building. Poll the
