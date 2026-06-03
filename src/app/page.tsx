@@ -1,14 +1,24 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
 import { User } from "@supabase/supabase-js";
+import { SpotifyPlaylist } from "@/lib/spotify";
+import { Database } from "@/types/database";
+
+type RecipeRow = Database["public"]["Tables"]["shuffle_recipes"]["Row"];
 
 export default function Home() {
   const supabase = createClient();
+  const queryClient = useQueryClient();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // Cockpit States
+  const [selectedPlaylistId, setSelectedPlaylistId] = useState("");
+  const [seed, setSeed] = useState<number>(() => Math.floor(Math.random() * 1000000));
+  const [outputName, setOutputName] = useState("");
 
   // Monitor auth state changes reactively
   useEffect(() => {
@@ -30,7 +40,12 @@ export default function Home() {
     };
   }, [supabase.auth]);
 
-  // Fetch Spotify profile using React Query
+  const generateRandomSeed = () => {
+    setSeed(Math.floor(Math.random() * 1000000));
+  };
+
+
+  // Fetch Spotify profile
   const { data: profile, isLoading: isProfileLoading } = useQuery({
     queryKey: ["spotify-profile", user?.id],
     queryFn: async () => {
@@ -42,6 +57,73 @@ export default function Home() {
       return data.profile;
     },
     enabled: !!user,
+  });
+
+  // Fetch User Playlists
+  const { data: playlists, isLoading: isPlaylistsLoading } = useQuery({
+    queryKey: ["spotify-playlists", user?.id],
+    queryFn: async () => {
+      const response = await fetch("/api/spotify/playlists");
+      if (!response.ok) {
+        throw new Error("Failed to fetch playlists");
+      }
+      const data = await response.json();
+      return data.playlists as SpotifyPlaylist[];
+    },
+    enabled: !!user,
+  });
+
+  // Fetch saved recipes from Supabase
+  const { data: recipes, isLoading: isRecipesLoading } = useQuery({
+    queryKey: ["shuffle-recipes", user?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("shuffle_recipes")
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!user,
+  });
+
+  // Auto-populate Output Name on selection
+  const handlePlaylistChange = (playlistId: string) => {
+    setSelectedPlaylistId(playlistId);
+    if (playlists) {
+      const selected = playlists.find((p) => p.id === playlistId);
+      if (selected) {
+        setOutputName(`${selected.name} (Road Trip Shuffled)`);
+      }
+    }
+  };
+
+  // Shuffle Mutation
+  const shuffleMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch("/api/shuffle", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          sourcePlaylistId: selectedPlaylistId,
+          seed,
+          outputName,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Shuffle execution failed");
+      }
+
+      return response.json();
+    },
+    onSuccess: () => {
+      // Invalidate recipes query to refresh the list
+      queryClient.invalidateQueries({ queryKey: ["shuffle-recipes", user?.id] });
+    },
   });
 
   const handleLogin = async () => {
@@ -56,6 +138,12 @@ export default function Home() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
+  };
+
+  const loadRecipe = (recipe: RecipeRow) => {
+    setSelectedPlaylistId(recipe.source_playlist_id);
+    setSeed(Number(recipe.seed));
+    setOutputName(recipe.name);
   };
 
   if (loading) {
@@ -106,18 +194,15 @@ export default function Home() {
       </header>
 
       {/* Main Content */}
-      <main className="z-10 flex flex-1 flex-col items-center justify-center px-6 py-12 md:px-12">
+      <main className="z-10 flex flex-1 flex-col items-center justify-start px-6 py-12 md:px-12 w-full">
         {!user ? (
           /* LANDING STATE */
-          <div className="flex max-w-4xl flex-col items-center text-center">
+          <div className="flex max-w-4xl flex-col items-center text-center mt-12">
             {/* Spinning CD Graphic */}
             <div className="group relative mb-8 flex h-36 w-36 items-center justify-center rounded-full bg-zinc-900 shadow-2xl border-4 border-zinc-800">
-              {/* Outer Vinyl grooves */}
               <div className="absolute inset-2 animate-[spin_10s_linear_infinite] rounded-full border border-dashed border-zinc-700/60 opacity-80"></div>
               <div className="absolute inset-5 animate-[spin_15s_linear_infinite] rounded-full border border-zinc-800"></div>
-              {/* Spinning CD/Vinyl Label */}
               <div className="relative flex h-20 w-20 animate-[spin_6s_linear_infinite] items-center justify-center rounded-full bg-gradient-to-tr from-emerald-600 via-emerald-500 to-teal-400 shadow-inner group-hover:scale-105 transition-transform duration-300">
-                {/* Hole */}
                 <div className="h-6 w-6 rounded-full bg-zinc-950 border border-zinc-800"></div>
               </div>
             </div>
@@ -145,7 +230,6 @@ export default function Home() {
                 onClick={handleLogin}
                 className="flex items-center gap-3 rounded-full bg-emerald-500 px-8 py-4 text-base font-bold text-zinc-950 transition-all duration-300 hover:scale-[1.02] hover:bg-emerald-400 hover:shadow-[0_0_30px_rgba(16,185,129,0.4)] active:scale-[0.98]"
               >
-                {/* Spotify Icon */}
                 <svg className="h-5 w-5 fill-current" viewBox="0 0 24 24">
                   <path d="M12 .007c-6.627 0-12 5.372-12 12s5.373 12 12 12 12-5.372 12-12-5.373-12-12-12zm5.49 17.306c-.234.368-.718.489-1.087.254-2.996-1.83-6.766-2.245-11.203-1.233-.42.096-.84-.17-.936-.59-.096-.42.17-.84.59-.936 4.866-1.112 9.023-.637 12.38 1.417.369.235.49.719.256 1.088zm1.467-3.258c-.295.479-.922.636-1.4.34-3.428-2.108-8.653-2.72-12.705-1.491-.539.163-1.113-.147-1.276-.687-.163-.539.148-1.113.687-1.276 4.636-1.407 10.395-.733 14.354 1.704.479.295.636.921.34 1.4zm.105-3.395c-4.108-2.44-10.873-2.665-14.795-1.474-.629.19-1.296-.165-1.487-.793-.191-.63.165-1.297.793-1.487 4.502-1.367 11.977-1.101 16.7 1.703.565.335.75.1.415.75-.336.565-1.066.75-1.626.401z" />
                 </svg>
@@ -182,29 +266,46 @@ export default function Home() {
           </div>
         ) : (
           /* AUTHENTICATED STATE */
-          <div className="w-full max-w-4xl">
-            {/* Success Banner */}
-            <div className="mb-8 flex items-center justify-between rounded-2xl border border-emerald-500/20 bg-emerald-500/5 px-6 py-4 backdrop-blur-sm">
-              <div className="flex items-center gap-3">
-                <span className="flex h-3 w-3 relative">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
-                </span>
-                <span className="text-sm font-semibold text-emerald-400">
-                  Spotify Account Connected Successfully
-                </span>
+          <div className="w-full max-w-5xl mt-6">
+            {/* Status Notifications */}
+            {shuffleMutation.isSuccess && (
+              <div className="mb-6 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-6 py-4 backdrop-blur-sm">
+                <div className="flex items-center gap-3">
+                  <span className="text-xl">🎉</span>
+                  <div>
+                    <h4 className="font-bold text-white text-sm">Shuffle Successful!</h4>
+                    <p className="text-xs text-zinc-300">
+                      Created playlist with {shuffleMutation.data.tracksCount} tracks.
+                    </p>
+                  </div>
+                </div>
+                <a
+                  href={shuffleMutation.data.playlistUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded-full bg-emerald-500 hover:bg-emerald-400 px-5 py-2 text-xs font-bold text-zinc-950 transition-all shadow-[0_0_15px_rgba(16,185,129,0.3)]"
+                >
+                  Open in Spotify
+                </a>
               </div>
-              <span className="text-xs text-emerald-500/70 uppercase tracking-widest font-mono">
-                Session Active
-              </span>
-            </div>
+            )}
 
-            <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
+            {shuffleMutation.isError && (
+              <div className="mb-6 rounded-2xl border border-red-500/30 bg-red-500/10 px-6 py-4 text-sm text-red-400 backdrop-blur-sm flex items-center gap-3">
+                <span>⚠️</span>
+                <div>
+                  <h4 className="font-bold">Shuffle Failed</h4>
+                  <p className="text-xs opacity-90">{shuffleMutation.error.message}</p>
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
               {/* User Profile Card */}
-              <div className="flex flex-col items-center text-center rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6 backdrop-blur-xl md:col-span-1 shadow-xl">
+              <div className="flex flex-col items-center text-center rounded-2xl border border-zinc-900 bg-zinc-900/30 p-6 backdrop-blur-md lg:col-span-1 shadow-xl h-fit">
                 {isProfileLoading ? (
                   <div className="flex flex-col items-center justify-center h-48 w-full">
-                    <div className="h-10 w-10 animate-spin rounded-full border-t-2 border-emerald-500"></div>
+                    <div className="h-8 w-8 animate-spin rounded-full border-t-2 border-emerald-500"></div>
                   </div>
                 ) : profile ? (
                   <>
@@ -223,9 +324,9 @@ export default function Home() {
                       )}
                     </div>
                     <h2 className="text-xl font-bold text-white">{profile.display_name}</h2>
-                    <p className="text-sm text-zinc-500 mt-1">{profile.email || "No email shared"}</p>
-                    <div className="mt-4 rounded-full bg-zinc-800/80 px-3 py-1 text-xs font-mono text-emerald-400 border border-zinc-700">
-                      ID: {profile.id}
+                    <div className="mt-3 flex items-center gap-2 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 text-xs font-mono text-emerald-400">
+                      <span className="h-2 w-2 rounded-full bg-emerald-500"></span>
+                      Connected
                     </div>
                   </>
                 ) : (
@@ -233,59 +334,157 @@ export default function Home() {
                 )}
               </div>
 
-              {/* Shuffler Cockpit Preview */}
-              <div className="flex flex-col justify-between rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6 backdrop-blur-xl md:col-span-2 shadow-xl">
+              {/* Shuffler Cockpit */}
+              <div className="flex flex-col justify-between rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6 backdrop-blur-xl lg:col-span-2 shadow-xl">
                 <div>
                   <div className="flex items-center justify-between border-b border-zinc-800/80 pb-4 mb-6">
                     <h2 className="text-xl font-bold text-white">Shuffle Cockpit</h2>
                     <span className="rounded bg-zinc-800 px-2.5 py-1 text-xs font-semibold text-zinc-400">
-                      Recipe Mode
+                      CD Changer Mode
                     </span>
                   </div>
 
-                  <div className="space-y-4 opacity-50 pointer-events-none select-none">
+                  <div className="space-y-5">
+                    {/* Source Playlist Selection */}
                     <div>
-                      <label className="block text-xs font-bold uppercase tracking-wider text-zinc-500 mb-2">
+                      <label className="block text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
                         Select Source Playlist
                       </label>
-                      <div className="w-full rounded-lg bg-zinc-950 border border-zinc-800 p-3 text-sm text-zinc-600">
-                        Select a playlist to shuffle...
-                      </div>
+                      {isPlaylistsLoading ? (
+                        <div className="h-11 w-full rounded-lg bg-zinc-950/50 border border-zinc-800/80 flex items-center px-4">
+                          <div className="h-4 w-4 animate-spin rounded-full border-t border-emerald-500 mr-2"></div>
+                          <span className="text-xs text-zinc-500">Loading playlists...</span>
+                        </div>
+                      ) : (
+                        <select
+                          value={selectedPlaylistId}
+                          onChange={(e) => handlePlaylistChange(e.target.value)}
+                          className="w-full rounded-lg bg-zinc-950 border border-zinc-800/80 p-3 text-sm text-zinc-200 outline-none focus:border-emerald-500 transition-colors"
+                        >
+                          <option value="">-- Choose a playlist --</option>
+                          {playlists?.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.name} ({p.tracks.total} tracks)
+                            </option>
+                          ))}
+                        </select>
+                      )}
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    {/* Shuffle Configuration */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-xs font-bold uppercase tracking-wider text-zinc-500 mb-2">
+                        <label className="block text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
                           Shuffle Seed
                         </label>
-                        <div className="w-full rounded-lg bg-zinc-950 border border-zinc-800 p-3 text-sm text-zinc-600">
-                          123456789
+                        <div className="flex gap-2">
+                          <input
+                            type="number"
+                            value={seed}
+                            onChange={(e) => setSeed(Number(e.target.value))}
+                            className="w-full rounded-lg bg-zinc-950 border border-zinc-800/80 p-3 text-sm text-zinc-200 outline-none focus:border-emerald-500 transition-colors"
+                          />
+                          <button
+                            onClick={generateRandomSeed}
+                            type="button"
+                            className="rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700/50 px-4 text-xs font-semibold text-zinc-300 transition-all active:scale-95"
+                            title="Generate Random Seed"
+                          >
+                            🎲
+                          </button>
                         </div>
                       </div>
+
                       <div>
-                        <label className="block text-xs font-bold uppercase tracking-wider text-zinc-500 mb-2">
-                          Output Name
+                        <label className="block text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
+                          Output Playlist Name
                         </label>
-                        <div className="w-full rounded-lg bg-zinc-950 border border-zinc-800 p-3 text-sm text-zinc-600">
-                          Road Trip Shuffled
-                        </div>
+                        <input
+                          type="text"
+                          value={outputName}
+                          onChange={(e) => setOutputName(e.target.value)}
+                          placeholder="My Playlist (Road Trip Shuffled)"
+                          className="w-full rounded-lg bg-zinc-950 border border-zinc-800/80 p-3 text-sm text-zinc-200 outline-none focus:border-emerald-500 transition-colors"
+                        />
                       </div>
                     </div>
                   </div>
                 </div>
 
                 <div className="mt-8 pt-6 border-t border-zinc-800/80">
-                  <p className="text-xs text-zinc-500 mb-4 text-center">
-                    Spotify integration complete! The next step will activate the Playlist Selector.
-                  </p>
                   <button
-                    disabled
-                    className="w-full rounded-full bg-zinc-800 py-3.5 text-center text-sm font-bold text-zinc-500 cursor-not-allowed border border-zinc-700/50"
+                    disabled={!selectedPlaylistId || !outputName || shuffleMutation.isPending}
+                    onClick={() => shuffleMutation.mutate()}
+                    className={`w-full rounded-full py-4 text-center text-sm font-bold transition-all duration-300 shadow-md ${
+                      !selectedPlaylistId || !outputName
+                        ? "bg-zinc-800 text-zinc-500 cursor-not-allowed border border-zinc-700/30"
+                        : "bg-emerald-500 hover:bg-emerald-400 text-zinc-950 hover:shadow-[0_0_20px_rgba(16,185,129,0.3)] active:scale-[0.99]"
+                    }`}
                   >
-                    Shuffling Activated in Next Step
+                    {shuffleMutation.isPending ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <span className="h-4 w-4 animate-spin rounded-full border-t-2 border-r-2 border-zinc-950"></span>
+                        Shuffling Tracks & Syncing...
+                      </span>
+                    ) : (
+                      "Shuffle & Sync to Spotify"
+                    )}
                   </button>
                 </div>
               </div>
+            </div>
+
+            {/* Saved Recipes Panel */}
+            <div className="mt-8 rounded-2xl border border-zinc-900 bg-zinc-900/20 p-6 backdrop-blur-md shadow-xl">
+              <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                <span>🗄️</span> Saved Shuffle Recipes
+              </h3>
+
+              {isRecipesLoading ? (
+                <div className="flex items-center justify-center py-10">
+                  <div className="h-6 w-6 animate-spin rounded-full border-t border-emerald-500"></div>
+                </div>
+              ) : recipes && recipes.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {recipes.map((r) => (
+                    <div
+                      key={r.id}
+                      className="group rounded-xl border border-zinc-800 bg-zinc-950/40 p-4 hover:border-zinc-700 transition-all flex flex-col justify-between"
+                    >
+                      <div>
+                        <h4 className="font-bold text-white text-sm truncate">{r.name}</h4>
+                        <div className="mt-2 space-y-1 text-xs text-zinc-500">
+                          <p>🌱 Seed: <span className="font-mono text-zinc-300">{r.seed}</span></p>
+                          <p>📅 Shuffled: {new Date(r.created_at).toLocaleDateString()}</p>
+                        </div>
+                      </div>
+                      <div className="mt-4 flex items-center justify-between gap-2 border-t border-zinc-900 pt-3">
+                        <button
+                          onClick={() => loadRecipe(r)}
+                          className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 transition-colors"
+                        >
+                          Load Settings
+                        </button>
+                        {r.output_playlist_id && (
+                          <a
+                            href={`https://open.spotify.com/playlist/${r.output_playlist_id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-zinc-500 hover:text-white transition-colors"
+                          >
+                            Open Link
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-10 rounded-xl border border-dashed border-zinc-800">
+                  <p className="text-sm text-zinc-500">No shuffle recipes saved yet.</p>
+                  <p className="text-xs text-zinc-600 mt-1">Shuffle a playlist to create your first recipe!</p>
+                </div>
+              )}
             </div>
           </div>
         )}
