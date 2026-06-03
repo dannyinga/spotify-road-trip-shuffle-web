@@ -1,4 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
+import { SupabaseClient } from "@supabase/supabase-js";
+import { Database } from "@/types/database";
 
 export interface SpotifyTokenData {
   user_id: string;
@@ -20,8 +22,8 @@ export interface SpotifyUserProfile {
  * it refreshes the token against the Spotify API, updates the database,
  * and returns the new token.
  */
-export async function getSpotifyAccessToken(userId: string): Promise<string> {
-  const supabase = await createClient();
+export async function getSpotifyAccessToken(userId: string, supabaseClient?: SupabaseClient<Database>): Promise<string> {
+  const supabase = supabaseClient || await createClient();
 
   // Retrieve tokens from the database. RLS guarantees we only see the current user's tokens if using the user's client,
   // but filtering by user_id ensures we fetch the correct record.
