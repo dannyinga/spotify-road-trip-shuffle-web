@@ -68,6 +68,15 @@ npm run db:migrate:check          # supabase db lint
 - [x] `roadTripShuffle` pure algorithm + Vitest suite
 - [x] First migration: `shuffle_recipes` table with owner-only RLS
 - [x] CI/CD pipeline: dev/stg/prd gates + backend deploys, verified end-to-end
-- [ ] Spotify OAuth login flow
-- [ ] Read playlist → shuffle → write-back Route Handler
-- [ ] Recipe save/list UI
+- [x] Spotify OAuth login flow
+- [x] Read playlist → shuffle → write-back Route Handler
+- [x] Recipe save/list UI
+- [x] Collaborative road-trip ("cabin") mode: invite codes, pooled playlists,
+      weighted group shuffle
+
+## Documentation
+
+- [docs/architecture.md](docs/architecture.md) — request flow, HTTP/API surface,
+  data model, and security (RLS) model.
+- [docs/pipeline.md](docs/pipeline.md) — CI/CD gates and deploy flow.
+- [docs/code-audit.md](docs/code-audit.md) — latest audit findings.

@@ -54,5 +54,5 @@ We believe in giving you full control over your data:
 
 If you have any questions, concerns, or requests regarding this Privacy Policy, please contact the developer:
 
-* **Developer Email:** [Insert Your Support/Developer Email Here]
-* **GitHub Repository:** [Insert GitHub Repository URL Here]
+* **Developer Email:** [dannyinga.professional@gmail.com]
+* **GitHub Repository:** [https://github.com/dannyinga/spotify-road-trip-shuffle-web]

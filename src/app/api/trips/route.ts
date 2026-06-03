@@ -82,9 +82,6 @@ export async function POST(request: Request) {
 
     const supabase = await createClient();
 
-    const { data: authDebug, error: debugErr } = await supabase.rpc("get_my_uid");
-    console.log("Database Auth Debug in POST /api/trips:", authDebug, "Debug Error:", debugErr);
-
     // 1. Authenticate user
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
@@ -130,8 +127,6 @@ export async function POST(request: Request) {
     if (!inviteCode) {
       return NextResponse.json({ error: "Failed to generate unique invite code" }, { status: 500 });
     }
-
-    console.log("POST /api/trips payload values:", { name, host_id: user.id, invite_code: inviteCode });
 
     // 4. Create the trip
     const { data: newTrip, error: insertError } = await supabase
