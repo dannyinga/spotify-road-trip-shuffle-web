@@ -11,6 +11,7 @@
     "test:unit": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:e2e:smoke": "playwright test --grep @smoke",
     "db:migrate:check": "supabase db lint",
     "db:push": "doppler run -- supabase db push --linked",
     "db:types": "doppler run -- supabase gen types typescript --linked > src/types/database.ts"

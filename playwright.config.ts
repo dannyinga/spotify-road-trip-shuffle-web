@@ -1,10 +1,19 @@
 import { defineConfig, devices } from "@playwright/test";
 
 /**
- * Playwright boots the app itself via `webServer`. Run it under Doppler so the
- * spawned dev server inherits Supabase env vars:
+ * Playwright E2E config.
+ *
+ * Local / pre-merge gates (qa-staging, qa-production): PLAYWRIGHT_BASE_URL is
+ * unset, so `webServer` boots `npm run dev` and tests hit it. Run under Doppler
+ * so the spawned dev server inherits Supabase env vars:
  *   doppler run -- npm run test:e2e
+ *
+ * Post-deploy validation (deploy-staging / deploy-production): PLAYWRIGHT_BASE_URL
+ * points at the deployed Vercel URL, so `webServer` is skipped and tests run
+ * against the real deployed artifact.
  */
+const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3000";
+
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
@@ -12,14 +21,16 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   reporter: "list",
   use: {
-    baseURL: "http://127.0.0.1:3000",
+    baseURL,
     trace: "on-first-retry",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  webServer: {
-    command: "npm run dev",
-    url: "http://127.0.0.1:3000",
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-  },
+  webServer: process.env.PLAYWRIGHT_BASE_URL
+    ? undefined
+    : {
+        command: "npm run dev",
+        url: "http://127.0.0.1:3000",
+        reuseExistingServer: !process.env.CI,
+        timeout: 120_000,
+      },
 });

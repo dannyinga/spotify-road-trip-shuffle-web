@@ -1,0 +1,154 @@
+name: Sync prd → dev
+
+#
+# Runs on every push to `prd` (i.e. every prod release merge from a
+# release/<vX.Y.Z> branch). Opens a `sync/prd-to-dev-<sha>` PR that back-merges
+# the post-release prd HEAD into `dev`.
+#
+# Why this exists (docs/pipeline.md): every prod release MUST be back-merged
+# into dev. Without it, dev silently drifts behind prd — any post-release
+# hotfix made on prd never reaches dev, and the next feature branches off stale
+# code. This makes the back-merge automatic instead of a manual SOP that's easy
+# to forget.
+#
+# If the back-merge conflicts, the PR is still opened (the merge is attempted
+# in-workflow; on conflict the markers are committed and carried through for
+# human resolution) and the workflow exits red so it's seen.
+#
+# Skip case: prd and dev already in sync (dev already contains prd HEAD) — the
+# workflow exits success with a noop log; no empty PR.
+#
+
+on:
+  push:
+    branches: [prd]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  backmerge:
+    name: Open back-merge PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout prd
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: prd
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Compute back-merge metadata
+        id: meta
+        run: |
+          set -euo pipefail
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          BRANCH="sync/prd-to-dev-${SHORT_SHA}"
+          PRD_SHA=$(git rev-parse HEAD)
+          MERGE_SUBJECT=$(git log -1 --pretty=%s HEAD)
+          echo "short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "prd_sha=$PRD_SHA" >> "$GITHUB_OUTPUT"
+          {
+            echo "merge_subject<<EOF"
+            echo "$MERGE_SUBJECT"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Skip if dev already contains prd HEAD
+        id: ahead
+        run: |
+          set -euo pipefail
+          git fetch origin dev
+          if git merge-base --is-ancestor "${{ steps.meta.outputs.prd_sha }}" origin/dev; then
+            echo "dev already contains prd HEAD — no back-merge needed."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create back-merge branch from dev
+        if: steps.ahead.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          git checkout -b "${{ steps.meta.outputs.branch }}" origin/dev
+
+      - name: Merge prd into back-merge branch
+        if: steps.ahead.outputs.skip == 'false'
+        id: merge
+        # `|| true` semantics: continue past a merge conflict — the resulting
+        # branch carries conflict markers into the PR for human resolution. The
+        # workflow still exits red (final step) so it's seen.
+        run: |
+          set -uo pipefail
+          if git merge --no-ff --no-edit \
+              -m "back-merge: prd (${{ steps.meta.outputs.short_sha }}) → dev" \
+              "${{ steps.meta.outputs.prd_sha }}"; then
+            echo "conflict=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Merge conflict — committing as-is with conflict markers."
+            git add -A
+            git commit --no-edit -m "back-merge with conflicts: prd (${{ steps.meta.outputs.short_sha }}) → dev (RESOLVE BEFORE MERGE)"
+            echo "conflict=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push back-merge branch
+        if: steps.ahead.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          git push -u origin "${{ steps.meta.outputs.branch }}"
+
+      - name: Open back-merge PR
+        if: steps.ahead.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          CONFLICT_NOTE=""
+          TITLE_PREFIX="[sync]"
+          if [ "${{ steps.merge.outputs.conflict }}" = "true" ]; then
+            CONFLICT_NOTE=$'\n> :warning: **This back-merge has unresolved conflicts.** Resolve them on the `${{ steps.meta.outputs.branch }}` branch before merging.\n'
+            TITLE_PREFIX="[sync][CONFLICTS]"
+          fi
+          BODY=$(cat <<EOF
+          ## Back-merge: prd → dev (auto-generated)
+
+          Source merge on prd: \`${{ steps.meta.outputs.merge_subject }}\` (\`${{ steps.meta.outputs.short_sha }}\`)
+          ${CONFLICT_NOTE}
+          ### Why this PR exists
+
+          docs/pipeline.md mandates a back-merge after every prod release. Without it, \`dev\` silently drifts behind prd — any post-release hotfix made on prd never reaches dev, and the next feature branches off stale code.
+
+          ### What to do
+
+          1. Review the diff (most often a no-op below the release commit itself).
+          2. If CI is green and there are no conflicts, merge with the standard merge strategy.
+          3. If conflicts are present, check them out locally, resolve, and push back to this branch.
+
+          ### What NOT to do
+
+          Don't squash-merge this. Use a regular merge commit so the back-merge chain stays visible on \`dev\`.
+
+          ---
+          🤖 Generated by [\`sync-prd-to-dev.yml\`](.github/workflows/sync-prd-to-dev.yml).
+          EOF
+          )
+          gh pr create \
+            --base dev \
+            --head "${{ steps.meta.outputs.branch }}" \
+            --title "$TITLE_PREFIX prd → dev — ${{ steps.meta.outputs.short_sha }}" \
+            --body "$BODY"
+
+      - name: Fail workflow on conflict
+        if: steps.ahead.outputs.skip == 'false' && steps.merge.outputs.conflict == 'true'
+        # PR is open, but exit red so the conflict is surfaced.
+        run: |
+          echo "::error::Back-merge from prd introduced conflicts. PR opened on sync/prd-to-dev-${{ steps.meta.outputs.short_sha }} — resolve manually."
+          exit 1
