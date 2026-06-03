@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { cookies } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
@@ -7,8 +8,33 @@ export async function GET(request: Request) {
   // Redirect location after successful login, defaulting to home page
   const next = searchParams.get("next") ?? "/";
 
+  // Create the redirect response object first so we can attach cookies directly to it
+  const response = NextResponse.redirect(`${origin}${next}`);
+
   if (code) {
-    const supabase = await createClient();
+    const cookieStore = await cookies();
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return cookieStore.getAll();
+          },
+          setAll(cookiesToSet) {
+            try {
+              cookiesToSet.forEach(({ name, value, options }) => {
+                cookieStore.set(name, value, options);
+                response.cookies.set(name, value, options);
+              });
+            } catch (err) {
+              console.error("Error setting cookies during exchange:", err);
+            }
+          },
+        },
+      }
+    );
+
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
     
     if (!error && data.session) {
@@ -40,7 +66,7 @@ export async function GET(request: Request) {
         console.warn("Spotify OAuth session did not include provider_token or provider_refresh_token.");
       }
       
-      return NextResponse.redirect(`${origin}${next}`);
+      return response;
     } else if (error) {
       console.error("Error exchanging code for session:", error);
     }
