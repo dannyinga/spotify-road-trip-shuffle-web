@@ -66,14 +66,14 @@ All routes require an authenticated Supabase user unless noted. They return
 | `DELETE /api/trips` | Leave the trip (passenger) or delete it entirely (host/`admin`). |
 | `POST /api/trips/join` | Join by code. Body: `{ inviteCode }`. Delegates to the `join_road_trip` RPC. Rejected if already in a trip. |
 | `POST /api/trips/update-playlist` | Set the caller's contributed playlist + `weight` (1–10) for a trip. Body: `{ tripId, playlistId, playlistName, trackCount, weight }`. |
-| `POST /api/trips/shuffle` | **Group shuffle (host only).** Body: `{ tripId, seed, outputName }`. Pools every member's contributed playlist (weighted, capped at 1000 tracks), runs `roadTripShuffle`, and writes the result to the host's Spotify account. |
+| `POST /api/trips/shuffle` | **Group shuffle (host only).** Body: `{ tripId, seed, outputName }`. Pools every member's contributed playlist (weighted, capped at 500 tracks), runs `roadTripShuffle`, and writes the result to the host's Spotify account. |
 
 ### Group-shuffle track pooling
 
 When the combined track count across all contributing members is within the
-1000-track cap, every track is included. Above the cap, each member receives a
+500-track cap, every track is included. Above the cap, each member receives a
 share proportional to their `weight`:
-`floor(1000 × weight / totalWeight)`, never more than the tracks they actually
+`floor(500 × weight / totalWeight)`, never more than the tracks they actually
 contributed. This math lives in the pure, unit-tested
 [`poolTracksByWeight`](../src/lib/shuffle/pool-tracks.ts) so it can be reasoned
 about independently of Spotify and the database. The same formula is mirrored in

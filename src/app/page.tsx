@@ -9,7 +9,7 @@ import { Database } from "@/types/database";
 
 type RecipeRow = Database["public"]["Tables"]["shuffle_recipes"]["Row"];
 
-const MAX_GROUP_TRACKS = 1000;
+const MAX_GROUP_TRACKS = 500;
 
 interface TripMember {
   user_id: string;
@@ -204,6 +204,7 @@ export default function Home() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["shuffle-recipes", user?.id] });
+      generateRandomSeed();
     },
   });
 
@@ -340,6 +341,7 @@ export default function Home() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["shuffle-recipes", user?.id] });
+      generateRandomSeed();
     },
   });
 
@@ -897,41 +899,17 @@ export default function Home() {
                       </div>
 
                       {/* Group Configuration */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
-                            Group Shuffle Seed
-                          </label>
-                          <div className="flex gap-2">
-                            <input
-                              type="number"
-                              value={seed}
-                              onChange={(e) => setSeed(Number(e.target.value))}
-                              className="w-full rounded-lg bg-zinc-950 border border-zinc-800/80 p-3 text-sm text-zinc-200 outline-none focus:border-emerald-500 transition-colors"
-                            />
-                            <button
-                              onClick={generateRandomSeed}
-                              type="button"
-                              className="rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700/50 px-4 text-xs font-semibold text-zinc-300 transition-all active:scale-95"
-                              title="Generate Random Seed"
-                            >
-                              🎲
-                            </button>
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className="block text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
-                            Output Playlist Name
-                          </label>
-                          <input
-                            type="text"
-                            value={outputName}
-                            onChange={(e) => setOutputName(e.target.value)}
-                            placeholder="e.g. Road Trip Cabin Mix"
-                            className="w-full rounded-lg bg-zinc-950 border border-zinc-800/80 p-3 text-sm text-zinc-200 outline-none focus:border-emerald-500 transition-colors"
-                          />
-                        </div>
+                      <div>
+                        <label className="block text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
+                          Output Playlist Name
+                        </label>
+                        <input
+                          type="text"
+                          value={outputName}
+                          onChange={(e) => setOutputName(e.target.value)}
+                          placeholder="e.g. Road Trip Cabin Mix"
+                          className="w-full rounded-lg bg-zinc-950 border border-zinc-800/80 p-3 text-sm text-zinc-200 outline-none focus:border-emerald-500 transition-colors"
+                        />
                       </div>
                     </div>
                   ) : (
@@ -964,41 +942,17 @@ export default function Home() {
                       </div>
 
                       {/* Shuffle Configuration */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
-                            Shuffle Seed
-                          </label>
-                          <div className="flex gap-2">
-                            <input
-                              type="number"
-                              value={seed}
-                              onChange={(e) => setSeed(Number(e.target.value))}
-                              className="w-full rounded-lg bg-zinc-950 border border-zinc-800/80 p-3 text-sm text-zinc-200 outline-none focus:border-emerald-500 transition-colors"
-                            />
-                            <button
-                              onClick={generateRandomSeed}
-                              type="button"
-                              className="rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700/50 px-4 text-xs font-semibold text-zinc-300 transition-all active:scale-95"
-                              title="Generate Random Seed"
-                            >
-                              🎲
-                            </button>
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className="block text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
-                            Output Playlist Name
-                          </label>
-                          <input
-                            type="text"
-                            value={outputName}
-                            onChange={(e) => setOutputName(e.target.value)}
-                            placeholder="My Playlist (Road Trip Shuffled)"
-                            className="w-full rounded-lg bg-zinc-950 border border-zinc-800/80 p-3 text-sm text-zinc-200 outline-none focus:border-emerald-500 transition-colors"
-                          />
-                        </div>
+                      <div>
+                        <label className="block text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
+                          Output Playlist Name
+                        </label>
+                        <input
+                          type="text"
+                          value={outputName}
+                          onChange={(e) => setOutputName(e.target.value)}
+                          placeholder="My Playlist (Road Trip Shuffled)"
+                          className="w-full rounded-lg bg-zinc-950 border border-zinc-800/80 p-3 text-sm text-zinc-200 outline-none focus:border-emerald-500 transition-colors"
+                        />
                       </div>
                     </div>
                   )}
@@ -1061,10 +1015,10 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Saved Recipes Panel */}
+            {/* Previous Shuffles Panel */}
             <div className="mt-8 rounded-2xl border border-zinc-900 bg-zinc-900/20 p-6 backdrop-blur-md shadow-xl">
               <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-                <span>🗄️</span> Saved Shuffle Recipes
+                <span>🗄️</span> Previous Shuffles
               </h3>
 
               {isRecipesLoading ? (
@@ -1102,7 +1056,7 @@ export default function Home() {
                                 ? "text-zinc-600 cursor-not-allowed"
                                 : "text-emerald-400 hover:text-emerald-300"
                             }`}
-                            title={r.trip_id ? "Cabin recipes cannot be loaded into the personal cockpit" : ""}
+                            title={r.trip_id ? "Cabin shuffles cannot be loaded into the personal cockpit" : ""}
                           >
                             Load Settings
                           </button>
@@ -1119,7 +1073,7 @@ export default function Home() {
                         </div>
                         <button
                           onClick={() => {
-                            if (confirm("Are you sure you want to delete this recipe?")) {
+                            if (confirm("Are you sure you want to delete this shuffle?")) {
                               deleteRecipeMutation.mutate(r.id);
                             }
                           }}
@@ -1134,8 +1088,8 @@ export default function Home() {
                 </div>
               ) : (
                 <div className="text-center py-10 rounded-xl border border-dashed border-zinc-800">
-                  <p className="text-sm text-zinc-500">No shuffle recipes saved yet.</p>
-                  <p className="text-xs text-zinc-600 mt-1">Shuffle a playlist to create your first recipe!</p>
+                  <p className="text-sm text-zinc-500">No previous shuffles saved yet.</p>
+                  <p className="text-xs text-zinc-600 mt-1">Shuffle a playlist to see it here!</p>
                 </div>
               )}
             </div>
