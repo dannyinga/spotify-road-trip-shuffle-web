@@ -1,4 +1,4 @@
-﻿export type Json =
+export type Json =
   | string
   | number
   | boolean
@@ -12,33 +12,47 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
+      marketplace_playlists: {
+        Row: {
+          created_at: string
+          creator_avatar_url: string | null
+          creator_name: string
+          description: string | null
+          id: string
+          name: string
+          spotify_playlist_url: string
+          tags: string[]
+          tracks: Json
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          creator_avatar_url?: string | null
+          creator_name?: string
+          description?: string | null
+          id?: string
+          name: string
+          spotify_playlist_url: string
+          tags?: string[]
+          tracks: Json
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          creator_avatar_url?: string | null
+          creator_name?: string
+          description?: string | null
+          id?: string
+          name?: string
+          spotify_playlist_url?: string
+          tags?: string[]
+          tracks?: Json
+          user_id?: string
+        }
+        Relationships: []
+      }
       road_trip_members: {
         Row: {
           joined_at: string
@@ -337,9 +351,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {},
   },
