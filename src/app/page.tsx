@@ -9,7 +9,7 @@ import { Database } from "@/types/database";
 
 type RecipeRow = Database["public"]["Tables"]["shuffle_recipes"]["Row"];
 
-const MAX_GROUP_TRACKS = 1000;
+const MAX_GROUP_TRACKS = 500;
 
 interface TripMember {
   user_id: string;
@@ -33,8 +33,20 @@ export default function Home() {
   const [selectedPlaylistId, setSelectedPlaylistId] = useState("");
   const [seed, setSeed] = useState<number>(() => Math.floor(Math.random() * 1000000));
   const [outputName, setOutputName] = useState("");
-  const [userSelectedMode, setUserSelectedMode] = useState<"personal" | "group" | null>(null);
+  const [userSelectedMode, setUserSelectedMode] = useState<"personal" | "group" | "marketplace" | null>(null);
   const [prevTripId, setPrevTripId] = useState<string | null>(null);
+
+  // Marketplace States
+  const [marketSearch, setMarketSearch] = useState("");
+  const [marketTag, setMarketTag] = useState("");
+  const [marketMineOnly, setMarketMineOnly] = useState(false);
+
+  // Publish Modal States
+  const [publishModalOpen, setPublishModalOpen] = useState(false);
+  const [publishPlaylistId, setPublishPlaylistId] = useState("");
+  const [publishName, setPublishName] = useState("");
+  const [publishDescription, setPublishDescription] = useState("");
+  const [publishTags, setPublishTags] = useState("");
 
   // Cabin Creation/Joining states
   const [newTripName, setNewTripName] = useState("");
@@ -204,6 +216,7 @@ export default function Home() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["shuffle-recipes", user?.id] });
+      generateRandomSeed();
     },
   });
 
@@ -278,6 +291,89 @@ export default function Home() {
     },
   });
 
+  // Fetch Marketplace Playlists
+  const { data: marketData, isLoading: isMarketLoading } = useQuery({
+    queryKey: ["marketplace-playlists", marketSearch, marketTag, marketMineOnly, user?.id],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (marketSearch) params.set("search", marketSearch);
+      if (marketTag) params.set("tag", marketTag);
+      if (marketMineOnly) params.set("mine", "true");
+      const response = await fetch(`/api/marketplace?${params.toString()}`);
+      if (!response.ok) {
+        throw new Error("Failed to fetch marketplace playlists");
+      }
+      return response.json();
+    },
+    enabled: !!user,
+  });
+  const marketPlaylists = marketData?.playlists || [];
+
+  // Publish Mutation
+  const publishMutation = useMutation({
+    mutationFn: async (variables: {
+      playlistId: string;
+      name: string;
+      description: string;
+      tags: string[];
+    }) => {
+      const response = await fetch("/api/marketplace/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(variables),
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to publish playlist");
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["marketplace-playlists"] });
+      setPublishModalOpen(false);
+      setPublishPlaylistId("");
+      setPublishName("");
+      setPublishDescription("");
+      setPublishTags("");
+    },
+  });
+
+  // Clone Mutation
+  const cloneMutation = useMutation({
+    mutationFn: async (playlistId: string) => {
+      const response = await fetch("/api/marketplace/clone", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ playlistId }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to clone playlist");
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["shuffle-recipes", user?.id] });
+    },
+  });
+
+  // Delete Marketplace Playlist Mutation
+  const deleteMarketplacePlaylistMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const response = await fetch(`/api/marketplace?id=${id}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to delete playlist");
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["marketplace-playlists"] });
+    },
+  });
+
   // Update Passenger Playlist contribution mutation
   const updatePassengerPlaylistMutation = useMutation({
     mutationFn: async (variables: { playlistId: string; playlistName: string; trackCount?: number; weight?: number }) => {
@@ -340,6 +436,7 @@ export default function Home() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["shuffle-recipes", user?.id] });
+      generateRandomSeed();
     },
   });
 
@@ -536,6 +633,58 @@ export default function Home() {
                 <div>
                   <h4 className="font-bold">Shuffle Failed</h4>
                   <p className="text-xs opacity-90">{activeMutation.error.message}</p>
+                </div>
+              </div>
+            )}
+
+            {cloneMutation.isSuccess && (
+              <div className="mb-6 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-6 py-4 backdrop-blur-sm">
+                <div className="flex items-center gap-3">
+                  <span className="text-xl">🎉</span>
+                  <div>
+                    <h4 className="font-bold text-white text-sm">Marketplace Playlist Cloned!</h4>
+                    <p className="text-xs text-zinc-300">
+                      Created copy with {cloneMutation.data.tracksCount} tracks on your Spotify account.
+                    </p>
+                  </div>
+                </div>
+                <a
+                  href={cloneMutation.data.playlistUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded-full bg-emerald-500 hover:bg-emerald-400 px-5 py-2 text-xs font-bold text-zinc-950 transition-all shadow-[0_0_15px_rgba(16,185,129,0.3)]"
+                >
+                  Open in Spotify
+                </a>
+              </div>
+            )}
+
+            {cloneMutation.isError && (
+              <div className="mb-6 rounded-2xl border border-red-500/30 bg-red-500/10 px-6 py-4 text-sm text-red-400 backdrop-blur-sm flex items-center gap-3">
+                <span>⚠️</span>
+                <div>
+                  <h4 className="font-bold">Clone Failed</h4>
+                  <p className="text-xs opacity-90">{cloneMutation.error.message}</p>
+                </div>
+              </div>
+            )}
+
+            {publishMutation.isSuccess && (
+              <div className="mb-6 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-6 py-4 text-sm text-emerald-400 backdrop-blur-sm flex items-center gap-3">
+                <span>✅</span>
+                <div>
+                  <h4 className="font-bold">Playlist Published!</h4>
+                  <p className="text-xs opacity-90">Your playlist has been successfully added to the marketplace.</p>
+                </div>
+              </div>
+            )}
+
+            {publishMutation.isError && (
+              <div className="mb-6 rounded-2xl border border-red-500/30 bg-red-500/10 px-6 py-4 text-sm text-red-400 backdrop-blur-sm flex items-center gap-3">
+                <span>⚠️</span>
+                <div>
+                  <h4 className="font-bold">Publish Failed</h4>
+                  <p className="text-xs opacity-90">{publishMutation.error.message}</p>
                 </div>
               </div>
             )}
@@ -813,18 +962,18 @@ export default function Home() {
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-800/80 pb-4 mb-6">
                     <div className="flex items-center gap-3">
                       <h2 className="text-xl font-bold text-white">Shuffle Cockpit</h2>
-                      {activeTrip && (
-                        <div className="flex rounded-lg bg-zinc-950 p-1 border border-zinc-800/80 text-xs">
-                          <button
-                            onClick={() => setUserSelectedMode("personal")}
-                            className={`px-3 py-1.5 rounded-md font-semibold transition-all ${
-                              cockpitMode === "personal"
-                                ? "bg-zinc-900 text-white"
-                                : "text-zinc-500 hover:text-zinc-300"
-                            }`}
-                          >
-                            Personal
-                          </button>
+                      <div className="flex rounded-lg bg-zinc-950 p-1 border border-zinc-800/80 text-xs">
+                        <button
+                          onClick={() => setUserSelectedMode("personal")}
+                          className={`px-3 py-1.5 rounded-md font-semibold transition-all ${
+                            cockpitMode === "personal"
+                              ? "bg-zinc-900 text-white"
+                              : "text-zinc-500 hover:text-zinc-300"
+                          }`}
+                        >
+                          Personal
+                        </button>
+                        {activeTrip && (
                           <button
                             onClick={() => setUserSelectedMode("group")}
                             className={`px-3 py-1.5 rounded-md font-semibold transition-all ${
@@ -835,11 +984,25 @@ export default function Home() {
                           >
                             Cabin
                           </button>
-                        </div>
-                      )}
+                        )}
+                        <button
+                          onClick={() => setUserSelectedMode("marketplace")}
+                          className={`px-3 py-1.5 rounded-md font-semibold transition-all ${
+                            cockpitMode === "marketplace"
+                              ? "bg-zinc-900 text-white"
+                              : "text-zinc-500 hover:text-zinc-300"
+                          }`}
+                        >
+                          Marketplace
+                        </button>
+                      </div>
                     </div>
                     <span className="rounded bg-zinc-800 px-2.5 py-1 text-xs font-semibold text-zinc-400 self-start sm:self-center">
-                      {cockpitMode === "group" ? "Multi-Tenant Crew Mode" : "CD Changer Mode"}
+                      {cockpitMode === "group"
+                        ? "Multi-Tenant Crew Mode"
+                        : cockpitMode === "marketplace"
+                        ? "Explore Shared Shuffles"
+                        : "CD Changer Mode"}
                     </span>
                   </div>
 
@@ -897,42 +1060,186 @@ export default function Home() {
                       </div>
 
                       {/* Group Configuration */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
-                            Group Shuffle Seed
-                          </label>
-                          <div className="flex gap-2">
-                            <input
-                              type="number"
-                              value={seed}
-                              onChange={(e) => setSeed(Number(e.target.value))}
-                              className="w-full rounded-lg bg-zinc-950 border border-zinc-800/80 p-3 text-sm text-zinc-200 outline-none focus:border-emerald-500 transition-colors"
-                            />
-                            <button
-                              onClick={generateRandomSeed}
-                              type="button"
-                              className="rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700/50 px-4 text-xs font-semibold text-zinc-300 transition-all active:scale-95"
-                              title="Generate Random Seed"
-                            >
-                              🎲
-                            </button>
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className="block text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
-                            Output Playlist Name
-                          </label>
+                      <div>
+                        <label className="block text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
+                          Output Playlist Name
+                        </label>
+                        <input
+                          type="text"
+                          value={outputName}
+                          onChange={(e) => setOutputName(e.target.value)}
+                          placeholder="e.g. Road Trip Cabin Mix"
+                          className="w-full rounded-lg bg-zinc-950 border border-zinc-800/80 p-3 text-sm text-zinc-200 outline-none focus:border-emerald-500 transition-colors"
+                        />
+                      </div>
+                    </div>
+                  ) : cockpitMode === "marketplace" ? (
+                    /* MARKETPLACE COCKPIT STATE */
+                    <div className="space-y-5">
+                      {/* Search and Filters */}
+                      <div className="flex flex-col gap-4 sm:flex-row sm:items-center justify-between">
+                        <div className="relative flex-1">
                           <input
                             type="text"
-                            value={outputName}
-                            onChange={(e) => setOutputName(e.target.value)}
-                            placeholder="e.g. Road Trip Cabin Mix"
-                            className="w-full rounded-lg bg-zinc-950 border border-zinc-800/80 p-3 text-sm text-zinc-200 outline-none focus:border-emerald-500 transition-colors"
+                            placeholder="Search playlists..."
+                            value={marketSearch}
+                            onChange={(e) => setMarketSearch(e.target.value)}
+                            className="w-full rounded-lg bg-zinc-950 border border-zinc-800 pl-10 pr-4 py-2.5 text-xs text-zinc-200 outline-none focus:border-emerald-500 transition-colors"
                           />
+                          <span className="absolute left-3.5 top-3 text-zinc-500 text-xs">🔍</span>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <label className="flex items-center gap-2 text-xs font-semibold text-zinc-400 cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={marketMineOnly}
+                              onChange={(e) => setMarketMineOnly(e.target.checked)}
+                              className="rounded border-zinc-800 bg-zinc-950 text-emerald-500 focus:ring-0 focus:ring-offset-0 h-4 w-4"
+                            />
+                            My Submissions
+                          </label>
                         </div>
                       </div>
+
+                      {/* Tag Quick Filters */}
+                      <div className="flex flex-wrap items-center gap-1.5 pb-2 border-b border-zinc-900">
+                        <span className="text-[10px] uppercase font-bold tracking-wider text-zinc-500 mr-1.5">Tags:</span>
+                        {["Rock", "Pop", "Hip Hop", "Summer", "Indie", "Classic Rock", "Electronic", "Country"].map((t) => {
+                          const isActive = marketTag === t;
+                          return (
+                            <button
+                              key={t}
+                              onClick={() => setMarketTag(isActive ? "" : t)}
+                              className={`rounded-full px-2.5 py-1 text-[10px] font-semibold transition-all ${
+                                isActive
+                                  ? "bg-emerald-500 text-zinc-950"
+                                  : "bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white"
+                              }`}
+                            >
+                              {t}
+                            </button>
+                          );
+                        })}
+                        {marketTag && (
+                          <button
+                            onClick={() => setMarketTag("")}
+                            className="rounded-full bg-red-950/20 border border-red-900/50 hover:bg-red-950/40 px-2.5 py-1 text-[10px] font-semibold text-red-400 transition-all"
+                          >
+                            Clear Filter ({marketTag})
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Marketplace List */}
+                      {isMarketLoading ? (
+                        <div className="flex flex-col items-center justify-center py-20">
+                          <div className="h-8 w-8 animate-spin rounded-full border-t-2 border-emerald-500"></div>
+                          <span className="text-xs text-zinc-500 mt-2 font-medium">Loading marketplace...</span>
+                        </div>
+                      ) : marketPlaylists.length > 0 ? (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[480px] overflow-y-auto pr-1">
+                          {marketPlaylists.map((p: Database["public"]["Tables"]["marketplace_playlists"]["Row"]) => {
+                            const isOwner = p.user_id === user?.id;
+                            const isCloning = cloneMutation.isPending && cloneMutation.variables === p.id;
+                            const tracksCount = Array.isArray(p.tracks) ? p.tracks.length : 0;
+                            return (
+                              <div
+                                key={p.id}
+                                className="group flex flex-col justify-between rounded-xl border border-zinc-850 bg-zinc-950/45 p-4 hover:border-zinc-700 transition-all"
+                              >
+                                <div>
+                                  <div className="flex items-start justify-between gap-2 mb-1.5">
+                                    <h4 className="font-bold text-white text-sm line-clamp-1" title={p.name}>
+                                      {p.name}
+                                    </h4>
+                                    <span className="shrink-0 rounded bg-zinc-900 border border-zinc-800/80 px-1.5 py-0.5 text-[9px] font-mono text-zinc-400">
+                                      {tracksCount} tracks
+                                    </span>
+                                  </div>
+
+                                  {p.description && (
+                                    <p className="text-xs text-zinc-455 line-clamp-2 italic mb-3 leading-relaxed">
+                                      &ldquo;{p.description}&rdquo;
+                                    </p>
+                                  )}
+
+                                  {/* Creator Info */}
+                                  <div className="flex items-center gap-2 mb-3">
+                                    {p.creator_avatar_url ? (
+                                      /* eslint-disable-next-line @next/next/no-img-element */
+                                      <img
+                                        src={p.creator_avatar_url}
+                                        alt={p.creator_name}
+                                        className="h-5 w-5 rounded-full object-cover border border-zinc-800"
+                                      />
+                                    ) : (
+                                      <div className="h-5 w-5 rounded-full bg-zinc-805 flex items-center justify-center text-[9px] font-bold text-zinc-400 border border-zinc-700">
+                                        {p.creator_name?.[0]?.toUpperCase()}
+                                      </div>
+                                    )}
+                                    <span className="text-[10px] text-zinc-550">
+                                      Published by <span className="text-zinc-300 font-semibold">{p.creator_name}</span>
+                                    </span>
+                                  </div>
+
+                                  {/* Tags */}
+                                  {p.tags && p.tags.length > 0 && (
+                                    <div className="flex flex-wrap gap-1 mb-4">
+                                      {p.tags.map((tag: string) => (
+                                        <button
+                                          key={tag}
+                                          onClick={() => setMarketTag(tag)}
+                                          className="rounded-md bg-zinc-900/80 border border-zinc-800/50 hover:bg-zinc-800 px-1.5 py-0.5 text-[9px] text-zinc-400 hover:text-white transition-colors"
+                                        >
+                                          #{tag}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+
+                                <div className="flex items-center justify-between gap-2 border-t border-zinc-900/60 pt-3 mt-auto">
+                                  <div className="flex gap-2">
+                                    <a
+                                      href={p.spotify_playlist_url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="rounded-lg border border-zinc-800 bg-zinc-900/40 hover:bg-zinc-900 hover:text-white px-3 py-1.5 text-[10px] font-bold text-zinc-400 transition-colors"
+                                    >
+                                      Spotify Link
+                                    </a>
+                                    <button
+                                      disabled={cloneMutation.isPending}
+                                      onClick={() => cloneMutation.mutate(p.id)}
+                                      className="rounded-lg bg-emerald-500 hover:bg-emerald-400 text-zinc-950 px-3 py-1.5 text-[10px] font-bold transition-all disabled:opacity-50"
+                                    >
+                                      {isCloning ? "Cloning..." : "Clone to Library"}
+                                    </button>
+                                  </div>
+                                  {isOwner && (
+                                    <button
+                                      onClick={() => {
+                                        if (confirm("Remove this playlist from the marketplace?")) {
+                                          deleteMarketplacePlaylistMutation.mutate(p.id);
+                                        }
+                                      }}
+                                      disabled={deleteMarketplacePlaylistMutation.isPending}
+                                      className="text-[10px] font-bold text-red-500 hover:text-red-400 transition-colors disabled:opacity-50"
+                                    >
+                                      Remove
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="text-center py-16 rounded-xl border border-dashed border-zinc-800">
+                          <p className="text-xs text-zinc-500 font-semibold uppercase tracking-wider mb-1">No Playlists Found</p>
+                          <p className="text-xs text-zinc-600">Be the first to publish your road trip shuffles to the public!</p>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     /* PERSONAL COCKPIT STATE */
@@ -964,107 +1271,85 @@ export default function Home() {
                       </div>
 
                       {/* Shuffle Configuration */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
-                            Shuffle Seed
-                          </label>
-                          <div className="flex gap-2">
-                            <input
-                              type="number"
-                              value={seed}
-                              onChange={(e) => setSeed(Number(e.target.value))}
-                              className="w-full rounded-lg bg-zinc-950 border border-zinc-800/80 p-3 text-sm text-zinc-200 outline-none focus:border-emerald-500 transition-colors"
-                            />
-                            <button
-                              onClick={generateRandomSeed}
-                              type="button"
-                              className="rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700/50 px-4 text-xs font-semibold text-zinc-300 transition-all active:scale-95"
-                              title="Generate Random Seed"
-                            >
-                              🎲
-                            </button>
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className="block text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
-                            Output Playlist Name
-                          </label>
-                          <input
-                            type="text"
-                            value={outputName}
-                            onChange={(e) => setOutputName(e.target.value)}
-                            placeholder="My Playlist (Road Trip Shuffled)"
-                            className="w-full rounded-lg bg-zinc-950 border border-zinc-800/80 p-3 text-sm text-zinc-200 outline-none focus:border-emerald-500 transition-colors"
-                          />
-                        </div>
+                      <div>
+                        <label className="block text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2">
+                          Output Playlist Name
+                        </label>
+                        <input
+                          type="text"
+                          value={outputName}
+                          onChange={(e) => setOutputName(e.target.value)}
+                          placeholder="My Playlist (Road Trip Shuffled)"
+                          className="w-full rounded-lg bg-zinc-950 border border-zinc-800/80 p-3 text-sm text-zinc-200 outline-none focus:border-emerald-500 transition-colors"
+                        />
                       </div>
                     </div>
                   )}
                 </div>
 
-                <div className="mt-8 pt-6 border-t border-zinc-800/80">
-                  {cockpitMode === "group" ? (
-                    /* GROUP SHUFFLE BUTTON (Host only vs Passenger waiting) */
-                    isHost ? (
+                {cockpitMode !== "marketplace" && (
+                  <div className="mt-8 pt-6 border-t border-zinc-800/80">
+                    {cockpitMode === "group" ? (
+                      /* GROUP SHUFFLE BUTTON (Host only vs Passenger waiting) */
+                      isHost ? (
+                        <button
+                          disabled={
+                            !activeTrip?.members?.some((m: TripMember) => m.spotify_playlist_id) ||
+                            !outputName ||
+                            groupShuffleMutation.isPending
+                          }
+                          onClick={() => groupShuffleMutation.mutate()}
+                          className={`w-full rounded-full py-4 text-center text-sm font-bold transition-all duration-300 shadow-md ${
+                            !activeTrip?.members?.some((m: TripMember) => m.spotify_playlist_id) || !outputName
+                              ? "bg-zinc-800 text-zinc-500 cursor-not-allowed border border-zinc-700/30"
+                              : "bg-emerald-500 hover:bg-emerald-400 text-zinc-950 hover:shadow-[0_0_20px_rgba(16,185,129,0.3)] active:scale-[0.99]"
+                          }`}
+                        >
+                          {groupShuffleMutation.isPending ? (
+                            <span className="flex items-center justify-center gap-2">
+                              <span className="h-4 w-4 animate-spin rounded-full border-t-2 border-r-2 border-zinc-950"></span>
+                              Shuffling Group Tracks & Syncing...
+                            </span>
+                          ) : (
+                            "Shuffle Cabin & Sync to Spotify"
+                          )}
+                        </button>
+                      ) : (
+                        <div className="w-full rounded-full py-4 bg-zinc-900 border border-zinc-800 text-zinc-500 text-center text-xs font-semibold select-none flex items-center justify-center gap-2">
+                          <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                          Waiting for host ({activeTrip?.members?.find((m: TripMember) => m.role === "admin")?.display_name || "Host"}) to shuffle...
+                        </div>
+                      )
+                    ) : (
+                      /* PERSONAL SHUFFLE BUTTON */
                       <button
-                        disabled={
-                          !activeTrip?.members?.some((m: TripMember) => m.spotify_playlist_id) ||
-                          !outputName ||
-                          groupShuffleMutation.isPending
-                        }
-                        onClick={() => groupShuffleMutation.mutate()}
+                        disabled={!selectedPlaylistId || !outputName || shuffleMutation.isPending}
+                        onClick={() => shuffleMutation.mutate()}
                         className={`w-full rounded-full py-4 text-center text-sm font-bold transition-all duration-300 shadow-md ${
-                          !activeTrip?.members?.some((m: TripMember) => m.spotify_playlist_id) || !outputName
+                          !selectedPlaylistId || !outputName
                             ? "bg-zinc-800 text-zinc-500 cursor-not-allowed border border-zinc-700/30"
                             : "bg-emerald-500 hover:bg-emerald-400 text-zinc-950 hover:shadow-[0_0_20px_rgba(16,185,129,0.3)] active:scale-[0.99]"
                         }`}
                       >
-                        {groupShuffleMutation.isPending ? (
+                        {shuffleMutation.isPending ? (
                           <span className="flex items-center justify-center gap-2">
                             <span className="h-4 w-4 animate-spin rounded-full border-t-2 border-r-2 border-zinc-950"></span>
-                            Shuffling Group Tracks & Syncing...
+                            Shuffling Tracks & Syncing...
                           </span>
                         ) : (
-                          "Shuffle Cabin & Sync to Spotify"
+                          "Shuffle & Sync to Spotify"
                         )}
                       </button>
-                    ) : (
-                      <div className="w-full rounded-full py-4 bg-zinc-900 border border-zinc-800 text-zinc-500 text-center text-xs font-semibold select-none flex items-center justify-center gap-2">
-                        <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                        Waiting for host ({activeTrip?.members?.find((m: TripMember) => m.role === "admin")?.display_name || "Host"}) to shuffle...
-                      </div>
-                    )
-                  ) : (
-                    /* PERSONAL SHUFFLE BUTTON */
-                    <button
-                      disabled={!selectedPlaylistId || !outputName || shuffleMutation.isPending}
-                      onClick={() => shuffleMutation.mutate()}
-                      className={`w-full rounded-full py-4 text-center text-sm font-bold transition-all duration-300 shadow-md ${
-                        !selectedPlaylistId || !outputName
-                          ? "bg-zinc-800 text-zinc-500 cursor-not-allowed border border-zinc-700/30"
-                          : "bg-emerald-500 hover:bg-emerald-400 text-zinc-950 hover:shadow-[0_0_20px_rgba(16,185,129,0.3)] active:scale-[0.99]"
-                      }`}
-                    >
-                      {shuffleMutation.isPending ? (
-                        <span className="flex items-center justify-center gap-2">
-                          <span className="h-4 w-4 animate-spin rounded-full border-t-2 border-r-2 border-zinc-950"></span>
-                          Shuffling Tracks & Syncing...
-                        </span>
-                      ) : (
-                        "Shuffle & Sync to Spotify"
-                      )}
-                    </button>
-                  )}
-                </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Saved Recipes Panel */}
+            {/* Previous Shuffles Panel */}
             <div className="mt-8 rounded-2xl border border-zinc-900 bg-zinc-900/20 p-6 backdrop-blur-md shadow-xl">
               <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-                <span>🗄️</span> Saved Shuffle Recipes
+                <span>🗄️</span> Previous Shuffles
               </h3>
 
               {isRecipesLoading ? (
@@ -1102,24 +1387,38 @@ export default function Home() {
                                 ? "text-zinc-600 cursor-not-allowed"
                                 : "text-emerald-400 hover:text-emerald-300"
                             }`}
-                            title={r.trip_id ? "Cabin recipes cannot be loaded into the personal cockpit" : ""}
+                            title={r.trip_id ? "Cabin shuffles cannot be loaded into the personal cockpit" : ""}
                           >
                             Load Settings
                           </button>
                           {r.output_playlist_id && (
-                            <a
-                              href={`https://open.spotify.com/playlist/${r.output_playlist_id}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-xs text-zinc-500 hover:text-white transition-colors"
-                            >
-                              Open Link
-                            </a>
+                            <>
+                              <a
+                                href={`https://open.spotify.com/playlist/${r.output_playlist_id}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs text-zinc-500 hover:text-white transition-colors"
+                              >
+                                Open Link
+                              </a>
+                              <button
+                                onClick={() => {
+                                  setPublishPlaylistId(r.output_playlist_id!);
+                                  setPublishName(r.name);
+                                  setPublishDescription("");
+                                  setPublishTags("");
+                                  setPublishModalOpen(true);
+                                }}
+                                className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold transition-colors"
+                              >
+                                Publish
+                              </button>
+                            </>
                           )}
                         </div>
                         <button
                           onClick={() => {
-                            if (confirm("Are you sure you want to delete this recipe?")) {
+                            if (confirm("Are you sure you want to delete this shuffle?")) {
                               deleteRecipeMutation.mutate(r.id);
                             }
                           }}
@@ -1134,8 +1433,8 @@ export default function Home() {
                 </div>
               ) : (
                 <div className="text-center py-10 rounded-xl border border-dashed border-zinc-800">
-                  <p className="text-sm text-zinc-500">No shuffle recipes saved yet.</p>
-                  <p className="text-xs text-zinc-600 mt-1">Shuffle a playlist to create your first recipe!</p>
+                  <p className="text-sm text-zinc-500">No previous shuffles saved yet.</p>
+                  <p className="text-xs text-zinc-600 mt-1">Shuffle a playlist to see it here!</p>
                 </div>
               )}
             </div>
@@ -1147,6 +1446,91 @@ export default function Home() {
       <footer className="z-10 py-8 text-center text-xs text-zinc-600 border-t border-zinc-900 bg-zinc-950/20">
         <p>© {new Date().getFullYear()} Road Trip Shuffle. Built with Next.js & Supabase.</p>
       </footer>
+      {/* Publish Modal */}
+      {publishModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+          <div className="relative w-full max-w-md rounded-2xl border border-zinc-850 bg-zinc-900/90 p-6 backdrop-blur-xl shadow-2xl">
+            <button
+              onClick={() => setPublishModalOpen(false)}
+              className="absolute right-4 top-4 text-zinc-500 hover:text-white transition-colors"
+            >
+              ✕
+            </button>
+            <h3 className="text-lg font-bold text-white mb-4">Publish to Marketplace</h3>
+            <p className="text-xs text-zinc-400 mb-6 leading-relaxed">
+              Share your shuffled road trip mix with the world. Anyone will be able to browse it, view its tracklist, and clone it to their library.
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-zinc-500 mb-1.5">
+                  Playlist Name
+                </label>
+                <input
+                  type="text"
+                  value={publishName}
+                  onChange={(e) => setPublishName(e.target.value)}
+                  className="w-full rounded-lg bg-zinc-950 border border-zinc-800 p-3 text-xs text-zinc-200 outline-none focus:border-emerald-500 transition-colors"
+                  placeholder="e.g. Pacific Coast Highway"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-zinc-500 mb-1.5">
+                  Description
+                </label>
+                <textarea
+                  value={publishDescription}
+                  onChange={(e) => setPublishDescription(e.target.value)}
+                  className="w-full h-20 rounded-lg bg-zinc-950 border border-zinc-800 p-3 text-xs text-zinc-200 outline-none focus:border-emerald-500 transition-colors resize-none"
+                  placeholder="What makes this playlist special? e.g. Best for a night drive from SF to LA."
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-zinc-500 mb-1.5 flex items-center justify-between">
+                  <span>Tags (Comma-separated)</span>
+                  <span className="text-[10px] text-zinc-650 font-medium normal-case">e.g. Summer, Rock, Indie</span>
+                </label>
+                <input
+                  type="text"
+                  value={publishTags}
+                  onChange={(e) => setPublishTags(e.target.value)}
+                  className="w-full rounded-lg bg-zinc-950 border border-zinc-800 p-3 text-xs text-zinc-200 outline-none focus:border-emerald-500 transition-colors"
+                  placeholder="Rock, Classic, Night Drive"
+                />
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3 border-t border-zinc-800 pt-4">
+              <button
+                onClick={() => setPublishModalOpen(false)}
+                className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-2.5 text-xs font-semibold text-zinc-450 hover:text-white transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={publishMutation.isPending || !publishName}
+                onClick={() => {
+                  const tagsArr = publishTags
+                    .split(",")
+                    .map((t) => t.trim())
+                    .filter((t) => t.length > 0);
+                  publishMutation.mutate({
+                    playlistId: publishPlaylistId,
+                    name: publishName,
+                    description: publishDescription,
+                    tags: tagsArr,
+                  });
+                }}
+                className="rounded-lg bg-emerald-500 hover:bg-emerald-400 text-zinc-950 px-5 py-2.5 text-xs font-bold transition-all disabled:opacity-50"
+              >
+                {publishMutation.isPending ? "Publishing..." : "Publish Now"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

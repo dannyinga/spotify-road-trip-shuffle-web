@@ -43,8 +43,28 @@ export async function POST(request: Request) {
       );
     }
 
+    // Deduplicate tracks by URI to ensure no duplicates in generated playlist
+    const seenUris = new Set<string>();
+    const uniqueTracks = playlistTracks.filter((track) => {
+      if (!track.uri || seenUris.has(track.uri)) {
+        return false;
+      }
+      seenUris.add(track.uri);
+      return true;
+    });
+
+    if (uniqueTracks.length === 0) {
+      return NextResponse.json(
+        { error: "The source playlist contains no valid unique tracks." },
+        { status: 400 }
+      );
+    }
+
+    // Limit to at most 500 tracks to avoid timeouts in developer mode
+    const cappedTracks = uniqueTracks.slice(0, 500);
+
     // 4. Run shuffle algorithm
-    const shuffleResult = roadTripShuffle(playlistTracks, { seed });
+    const shuffleResult = roadTripShuffle(cappedTracks, { seed });
 
     // 5. Create new playlist on Spotify
     const newPlaylist = await createPlaylist(
