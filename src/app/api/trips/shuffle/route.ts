@@ -11,7 +11,7 @@ import {
 import { roadTripShuffle } from "@/lib/shuffle/road-trip-shuffle";
 import { poolTracksByWeight } from "@/lib/shuffle/pool-tracks";
 
-const MAX_TOTAL_TRACKS = 1000;
+const MAX_TOTAL_TRACKS = 500;
 
 export async function POST(request: Request) {
   try {
@@ -101,15 +101,25 @@ export async function POST(request: Request) {
     // include every track. (Pure logic lives in poolTracksByWeight.)
     const pooledTracks = poolTracksByWeight(memberGroups, MAX_TOTAL_TRACKS);
 
-    if (pooledTracks.length === 0) {
+    // Deduplicate the pooled tracks globally to prevent duplicate songs in generated playlist
+    const seenUris = new Set<string>();
+    const uniquePooledTracks = pooledTracks.filter((track) => {
+      if (!track.uri || seenUris.has(track.uri)) {
+        return false;
+      }
+      seenUris.add(track.uri);
+      return true;
+    });
+
+    if (uniquePooledTracks.length === 0) {
       return NextResponse.json(
-        { error: "Failed to assemble pooled track list." },
+        { error: "Failed to assemble pooled track list (no unique tracks found)." },
         { status: 400 }
       );
     }
 
     // 6. Run shuffle algorithm
-    const shuffleResult = roadTripShuffle(pooledTracks, { seed });
+    const shuffleResult = roadTripShuffle(uniquePooledTracks, { seed });
 
     // 7. Create output playlist on host's Spotify account
     const hostToken = await getSpotifyAccessToken(user.id, adminClient);
